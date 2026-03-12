@@ -1,86 +1,198 @@
-import React, { useContext } from 'react';
-import { View, Text, Switch, StyleSheet, SafeAreaView, TouchableOpacity, Linking, Alert } from 'react-native';
+import React, { useContext, useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeContext } from '../theme/ThemeContext';
+import { DEFAULT_USER_ID } from '../services/config';
+import { registerUserDevice } from '../services/incidentsApi';
 
 export default function SettingsScreen() {
-    const { isDarkMode, toggleTheme } = useContext(ThemeContext);
+  const { isDarkMode, toggleTheme } = useContext(ThemeContext);
+  const [smsOptIn, setSmsOptIn] = useState(false);
+  const [phone, setPhone] = useState('');
 
-    return (
-        <SafeAreaView style={[styles.container, isDarkMode && styles.darkContainer]}>
-            <View style={styles.header}>
-                <Text style={[styles.title, isDarkMode && styles.darkText]}>Preferences</Text>
-                <Text style={styles.subtitle}>SentinelX Global Ecosystem</Text>
-            </View>
+  const cardAnim = useRef(new Animated.Value(0)).current;
 
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>APPEARANCE</Text>
-                <View style={[styles.card, isDarkMode && styles.darkCard]}>
-                    <View style={styles.settingRow}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, isDarkMode && styles.darkText]}>Dark Mode Map</Text>
-                            <Text style={styles.settingSubtext}>Reduces eye strain in night environments</Text>
-                        </View>
-                        <Switch
-                            value={isDarkMode}
-                            onValueChange={toggleTheme}
-                            trackColor={{ false: '#E5E5EA', true: '#34C759' }}
-                            thumbColor={'#FFFFFF'}
-                            ios_backgroundColor="#E5E5EA"
-                        />
-                    </View>
-                </View>
-            </View>
+  React.useEffect(() => {
+    Animated.spring(cardAnim, {
+      toValue: 1,
+      friction: 8,
+      tension: 45,
+      useNativeDriver: true
+    }).start();
+  }, [cardAnim]);
 
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>SYSTEM DIAGNOSTICS</Text>
-                <View style={[styles.card, isDarkMode && styles.darkCard]}>
-                    <View style={[styles.settingRow, styles.borderBottom, isDarkMode && styles.darkBorder]}>
-                        <Text style={[styles.settingLabel, isDarkMode && styles.darkText]}>Network Host</Text>
-                        <Text style={styles.valueText}>10.104.72.216</Text>
-                    </View>
-                    <View style={[styles.settingRow, styles.borderBottom, isDarkMode && styles.darkBorder]}>
-                        <Text style={[styles.settingLabel, isDarkMode && styles.darkText]}>WebSocket</Text>
-                        <View style={styles.statusBadge}><Text style={styles.statusText}>Connected</Text></View>
-                    </View>
-                    <View style={styles.settingRow}>
-                        <Text style={[styles.settingLabel, isDarkMode && styles.darkText]}>App Version</Text>
-                        <Text style={styles.valueText}>1.0.0 (Production)</Text>
-                    </View>
-                </View>
-            </View>
+  const syncPreferences = async (nextOptIn, nextPhone = phone) => {
+    try {
+      await registerUserDevice({
+        user_id: DEFAULT_USER_ID,
+        phone_number: nextPhone,
+        sms_opt_in: nextOptIn
+      });
+    } catch (error) {
+      Alert.alert('Sync failed', error.message);
+    }
+  };
 
-            <TouchableOpacity style={styles.adminBtn} onPress={() => Alert.alert('Access Denied', 'Please access the Moderation Dashboard via laptop to approve incident reports.')}>
-                <Text style={styles.adminText}>Admin Web Portal</Text>
-            </TouchableOpacity>
-        </SafeAreaView>
-    );
+  return (
+    <SafeAreaView style={[styles.container, isDarkMode && styles.darkContainer]}>
+      <Text style={[styles.title, isDarkMode && styles.darkText]}>System Preferences</Text>
+
+      <Animated.View
+        style={[
+          styles.card,
+          isDarkMode && styles.darkCard,
+          {
+            opacity: cardAnim,
+            transform: [
+              {
+                translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] })
+              }
+            ]
+          }
+        ]}>
+        <View style={styles.row}>
+          <View>
+            <Text style={[styles.label, isDarkMode && styles.darkText]}>Dark Theme Map</Text>
+            <Text style={styles.meta}>High-contrast map style for operations.</Text>
+          </View>
+          <Switch value={isDarkMode} onValueChange={toggleTheme} />
+        </View>
+
+        <View style={styles.separator} />
+
+        <View style={styles.rowNoInline}>
+          <View style={styles.smsInfoWrap}>
+            <Text style={[styles.label, isDarkMode && styles.darkText]}>SMS Opt-In</Text>
+            <Text style={styles.meta}>Enable Twilio fallback alerts with daily limit.</Text>
+          </View>
+          <Switch
+            value={smsOptIn}
+            onValueChange={(value) => {
+              setSmsOptIn(value);
+              syncPreferences(value);
+            }}
+          />
+        </View>
+
+        <TextInput
+          style={[styles.input, isDarkMode && styles.inputDark]}
+          value={phone}
+          onChangeText={setPhone}
+          placeholder="Phone number (+91...)"
+          placeholderTextColor="#6b7280"
+          keyboardType="phone-pad"
+          onEndEditing={() => syncPreferences(smsOptIn, phone)}
+        />
+      </Animated.View>
+
+      <Animated.View
+        style={[
+          styles.card,
+          isDarkMode && styles.darkCard,
+          {
+            opacity: cardAnim,
+            transform: [
+              {
+                translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [26, 0] })
+              }
+            ]
+          }
+        ]}>
+        <Text style={[styles.label, isDarkMode && styles.darkText]}>Diagnostics</Text>
+        <Text style={styles.meta}>Connection and map status are now shown directly on the map screen.</Text>
+      </Animated.View>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F2F2F7' },
-    darkContainer: { backgroundColor: '#000000' },
-    header: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 20 },
-    title: { fontSize: 34, fontWeight: '800', color: '#000', letterSpacing: -0.5 },
-    subtitle: { fontSize: 15, color: '#8E8E93', fontWeight: '600', marginTop: 4 },
-    darkText: { color: '#FFFFFF' },
-
-    section: { marginBottom: 30, paddingHorizontal: 16 },
-    sectionTitle: { fontSize: 13, fontWeight: '700', color: '#8E8E93', marginLeft: 16, marginBottom: 8, letterSpacing: 1 },
-    card: { backgroundColor: '#FFFFFF', borderRadius: 12, overflow: 'hidden' },
-    darkCard: { backgroundColor: '#1C1C1E' },
-
-    settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-    borderBottom: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#C6C6C8' },
-    darkBorder: { borderBottomColor: '#38383A' },
-
-    settingInfo: { flex: 1, paddingRight: 20 },
-    settingLabel: { fontSize: 17, fontWeight: '500', color: '#000' },
-    settingSubtext: { fontSize: 13, color: '#8E8E93', marginTop: 4 },
-    valueText: { fontSize: 17, color: '#8E8E93' },
-
-    statusBadge: { backgroundColor: '#34C759', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-    statusText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
-
-    adminBtn: { marginHorizontal: 16, backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-    adminText: { color: '#FFF', fontSize: 16, fontWeight: '700' }
+  container: {
+    flex: 1,
+    backgroundColor: '#ecf3fa',
+    padding: 16
+  },
+  darkContainer: {
+    backgroundColor: '#020617'
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 16
+  },
+  darkText: {
+    color: '#f8fafc'
+  },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#d3e4f6',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.09,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 5
+  },
+  darkCard: {
+    backgroundColor: 'rgba(17,24,39,0.9)',
+    borderColor: '#1f2937'
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  rowNoInline: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  smsInfoWrap: {
+    flex: 1,
+    marginRight: 10
+  },
+  label: {
+    fontSize: 16,
+    color: '#0f172a',
+    fontWeight: '700'
+  },
+  meta: {
+    marginTop: 3,
+    color: '#64748b',
+    fontSize: 12,
+    maxWidth: 250
+  },
+  separator: {
+    marginVertical: 12,
+    height: 1,
+    backgroundColor: '#dbeafe'
+  },
+  input: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    color: '#111827'
+  },
+  inputDark: {
+    borderColor: '#374151',
+    color: '#f8fafc'
+  }
 });
+
+
+
+

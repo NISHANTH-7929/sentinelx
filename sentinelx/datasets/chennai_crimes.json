@@ -1,0 +1,182 @@
+[
+  {
+    "type": "theft",
+    "description": "Mobile phone snatched near T Nagar bus stop",
+    "latitude": 13.0418,
+    "longitude": 80.2337,
+    "datetime": "2024-03-01T08:15:00.000Z",
+    "confidence": 0.82,
+    "media_urls": []
+  },
+  {
+    "type": "fire",
+    "description": "Electrical fire reported in small warehouse at Guindy",
+    "latitude": 13.0095,
+    "longitude": 80.2206,
+    "datetime": "2024-03-01T08:20:00.000Z",
+    "confidence": 0.91,
+    "media_urls": []
+  },
+  {
+    "type": "accident",
+    "description": "Two-wheeler collision on Anna Salai",
+    "latitude": 13.0676,
+    "longitude": 80.2641,
+    "datetime": "2024-03-01T08:25:00.000Z",
+    "confidence": 0.87,
+    "media_urls": []
+  },
+  {
+    "type": "assault",
+    "description": "Street altercation escalated near Egmore station",
+    "latitude": 13.0732,
+    "longitude": 80.2618,
+    "datetime": "2024-03-01T08:31:00.000Z",
+    "confidence": 0.76,
+    "media_urls": []
+  },
+  {
+    "type": "theft",
+    "description": "Bike theft complaint logged at Velachery",
+    "latitude": 12.9759,
+    "longitude": 80.2212,
+    "datetime": "2024-03-01T08:35:00.000Z",
+    "confidence": 0.8,
+    "media_urls": []
+  },
+  {
+    "type": "murder",
+    "description": "Stabbing incident near Perambur market",
+    "latitude": 13.1139,
+    "longitude": 80.2469,
+    "datetime": "2024-03-01T08:40:00.000Z",
+    "confidence": 0.88,
+    "media_urls": []
+  },
+  {
+    "type": "fire",
+    "description": "Kitchen fire in apartment block, Nungambakkam",
+    "latitude": 13.0604,
+    "longitude": 80.2423,
+    "datetime": "2024-03-01T08:46:00.000Z",
+    "confidence": 0.9,
+    "media_urls": []
+  },
+  {
+    "type": "accident",
+    "description": "Mini truck overturned near Koyambedu",
+    "latitude": 13.0716,
+    "longitude": 80.1941,
+    "datetime": "2024-03-01T08:51:00.000Z",
+    "confidence": 0.84,
+    "media_urls": []
+  },
+  {
+    "type": "theft",
+    "description": "Shop break-in at Mylapore street",
+    "latitude": 13.0339,
+    "longitude": 80.2696,
+    "datetime": "2024-03-01T08:58:00.000Z",
+    "confidence": 0.81,
+    "media_urls": []
+  },
+  {
+    "type": "assault",
+    "description": "Group fight reported in Royapuram",
+    "latitude": 13.1132,
+    "longitude": 80.2957,
+    "datetime": "2024-03-01T09:05:00.000Z",
+    "confidence": 0.74,
+    "media_urls": []
+  },
+  {
+    "type": "fire",
+    "description": "Smoke seen from textile shop in Parrys",
+    "latitude": 13.0902,
+    "longitude": 80.2877,
+    "datetime": "2024-03-01T09:11:00.000Z",
+    "confidence": 0.89,
+    "media_urls": []
+  },
+  {
+    "type": "rape",
+    "description": "Sensitive assault report filed in Adyar",
+    "latitude": 13.0042,
+    "longitude": 80.2571,
+    "datetime": "2024-03-01T09:18:00.000Z",
+    "confidence": 0.83,
+    "media_urls": []
+  },
+  {
+    "type": "accident",
+    "description": "Bus side-impact collision on EVR Periyar Road",
+    "latitude": 13.0829,
+    "longitude": 80.2245,
+    "datetime": "2024-03-01T09:24:00.000Z",
+    "confidence": 0.86,
+    "media_urls": []
+  },
+  {
+    "type": "theft",
+    "description": "Wallet stolen in crowded train platform",
+    "latitude": 13.1001,
+    "longitude": 80.2712,
+    "datetime": "2024-03-01T09:29:00.000Z",
+    "confidence": 0.79,
+    "media_urls": []
+  },
+  {
+    "type": "fire",
+    "description": "Transformer burst and fire at Saidapet",
+    "latitude": 13.0237,
+    "longitude": 80.2282,
+    "datetime": "2024-03-01T09:35:00.000Z",
+    "confidence": 0.92,
+    "media_urls": []
+  },
+  {
+    "type": "assault",
+    "description": "Physical assault complaint near Marina stretch",
+    "latitude": 13.0507,
+    "longitude": 80.2824,
+    "datetime": "2024-03-01T09:41:00.000Z",
+    "confidence": 0.77,
+    "media_urls": []
+  },
+  {
+    "type": "accident",
+    "description": "Rear-end pileup near Kathipara flyover",
+    "latitude": 13.0103,
+    "longitude": 80.2062,
+    "datetime": "2024-03-01T09:47:00.000Z",
+    "confidence": 0.88,
+    "media_urls": []
+  },
+  {
+    "type": "murder",
+    "description": "Gunshot-related homicide investigation in North Chennai",
+    "latitude": 13.1214,
+    "longitude": 80.2873,
+    "datetime": "2024-03-01T09:52:00.000Z",
+    "confidence": 0.9,
+    "media_urls": []
+  },
+  {
+    "type": "theft",
+    "description": "ATM cash snatch report in West Mambalam",
+    "latitude": 13.0382,
+    "longitude": 80.2201,
+    "datetime": "2024-03-01T09:57:00.000Z",
+    "confidence": 0.81,
+    "media_urls": []
+  },
+  {
+    "type": "fire",
+    "description": "Major accident with fire in industrial lane",
+    "latitude": 13.0978,
+    "longitude": 80.1766,
+    "datetime": "2024-03-01T10:05:00.000Z",
+    "confidence": 0.94,
+    "media_urls": []
+  }
+]
