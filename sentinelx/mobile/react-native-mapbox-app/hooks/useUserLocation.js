@@ -2,12 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, PermissionsAndroid, Platform } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
 
-const LOCATION_ERROR_MESSAGE = 'Location access required';
-
 const requestAndroidPermission = async () => {
   const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, {
-    title: 'Location access required',
-    message: 'SentinelX needs location to show nearby incidents and exact coordinates.',
+    title: 'Location Access',
+    message: 'SentinelX needs location access to show nearby incidents and your exact position on the map.',
     buttonPositive: 'Allow',
     buttonNegative: 'Deny'
   });
@@ -28,27 +26,30 @@ const getPosition = () =>
   new Promise((resolve, reject) => {
     Geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
-      timeout: 9000,
+      timeout: 12000,
       maximumAge: 0
     });
   });
 
 const getPositionWithRetry = async (maxAttempts = 3) => {
   let attempt = 0;
+  let lastError = null;
 
   while (attempt < maxAttempts) {
     try {
-      const position = await getPosition();
-      return position;
+      return await getPosition();
     } catch (error) {
+      lastError = error;
       attempt += 1;
       if (attempt >= maxAttempts) {
-        throw error;
+        throw lastError;
       }
+      // Small delay between retries
+      await new Promise((r) => setTimeout(r, 800));
     }
   }
 
-  throw new Error('Unable to resolve location');
+  throw lastError || new Error('Unable to resolve location');
 };
 
 export const useUserLocation = () => {
@@ -59,6 +60,14 @@ export const useUserLocation = () => {
   const [locationError, setLocationError] = useState('');
   const [isResolving, setIsResolving] = useState(false);
   const watchIdRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const trackLocation = useCallback(() => {
     if (watchIdRef.current !== null) {
@@ -67,51 +76,80 @@ export const useUserLocation = () => {
 
     watchIdRef.current = Geolocation.watchPosition(
       (position) => {
-        setCoordinate([position.coords.longitude, position.coords.latitude]);
-        setManualMode(false);
-        setLocationError('');
+        if (mountedRef.current) {
+          setCoordinate([position.coords.longitude, position.coords.latitude]);
+          setManualMode(false);
+          setLocationError('');
+        }
       },
-      (error) => {
-        setLocationError('Live tracking lost. Please check GPS.');
-        console.warn('Geolocation Error:', error);
+      () => {
+        if (mountedRef.current) {
+          setLocationError('Live tracking interrupted. Tap "Retry GPS" to reconnect.');
+        }
       },
       { enableHighAccuracy: true, distanceFilter: 10, interval: 5000, fastestInterval: 2000 }
     );
   }, []);
 
   const resolveLocation = useCallback(async () => {
+    if (!mountedRef.current) return;
     setIsResolving(true);
     setLocationError('');
 
     try {
       const position = await getPositionWithRetry(3);
+      if (!mountedRef.current) return;
       setCoordinate([position.coords.longitude, position.coords.latitude]);
       setManualMode(false);
       trackLocation();
-    } catch (_error) {
-      setLocationError('GPS unavailable after 3 retries. Use manual location.');
+    } catch (error) {
+      if (!mountedRef.current) return;
+      const code = error?.code;
+      if (code === 1) {
+        setLocationError('Location permission denied. Please enable it in Settings.');
+      } else if (code === 2) {
+        setLocationError('GPS signal unavailable. Move to an open area or use manual location.');
+      } else if (code === 3) {
+        setLocationError('Location request timed out. Tap "Retry GPS" or use manual location.');
+      } else {
+        setLocationError('Unable to get your location. Use manual location or retry.');
+      }
       setManualMode(true);
     } finally {
-      setIsResolving(false);
+      if (mountedRef.current) {
+        setIsResolving(false);
+      }
     }
   }, [trackLocation]);
 
   const initialize = useCallback(async () => {
-    const granted = await requestPermission();
-    setPermissionGranted(granted);
+    try {
+      const granted = await requestPermission();
+      if (!mountedRef.current) return;
+      setPermissionGranted(granted);
 
-    if (!granted) {
-      setShowPermissionModal(true);
-      setLocationError(LOCATION_ERROR_MESSAGE);
-      return;
+      if (!granted) {
+        setShowPermissionModal(true);
+        setLocationError('Location permission required. Please allow access.');
+        return;
+      }
+
+      await resolveLocation();
+    } catch (_error) {
+      if (mountedRef.current) {
+        setLocationError('Unable to initialize location services.');
+        setManualMode(true);
+      }
     }
-
-    await resolveLocation();
   }, [resolveLocation]);
 
   useEffect(() => {
-    initialize();
+    const handle = setTimeout(() => {
+      initialize();
+    }, 0);
+
     return () => {
+      clearTimeout(handle);
       if (watchIdRef.current !== null) {
         Geolocation.clearWatch(watchIdRef.current);
       }
@@ -124,6 +162,7 @@ export const useUserLocation = () => {
 
   const useManualLocation = useCallback(() => {
     setManualMode(true);
+    setLocationError('');
     if (watchIdRef.current !== null) {
       Geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;

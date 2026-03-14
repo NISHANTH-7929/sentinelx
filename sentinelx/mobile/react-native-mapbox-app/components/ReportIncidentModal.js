@@ -1,7 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
+import { ThemeContext } from '../theme/ThemeContext';
 import {
+  Alert,
   Image,
   Modal,
+  PermissionsAndroid,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -13,21 +17,35 @@ import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 
 const categories = ['fire', 'accident', 'theft', 'assault', 'murder', 'rape', 'other'];
 
+const ensureCameraPermission = async () => {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const camera = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+    if (camera !== PermissionsAndroid.RESULTS.GRANTED) return false;
+    const mediaPermission = Platform.Version >= 33
+      ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+      : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+    const media = await PermissionsAndroid.request(mediaPermission);
+    return media === PermissionsAndroid.RESULTS.GRANTED;
+  } catch (_error) {
+    return false;
+  }
+};
+
 export default function ReportIncidentModal({ visible, location, onClose, onSubmit }) {
+  const { isDarkMode } = useContext(ThemeContext);
+  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode]);
   const [step, setStep] = useState(1);
   const [category, setCategory] = useState('fire');
   const [description, setDescription] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaUri, setMediaUri] = useState('');
   const [anonymous, setAnonymous] = useState(true);
+  const [imageError, setImageError] = useState('');
 
   const canProceed = useMemo(() => {
-    if (step === 1) {
-      return Boolean(category);
-    }
-    if (step === 2) {
-      return description.trim().length > 5;
-    }
+    if (step === 1) return Boolean(category);
+    if (step === 2) return description.trim().length > 5;
     return Boolean(location);
   }, [category, description, location, step]);
 
@@ -38,65 +56,108 @@ export default function ReportIncidentModal({ visible, location, onClose, onSubm
     setMediaUrl('');
     setMediaUri('');
     setAnonymous(true);
+    setImageError('');
     onClose();
   };
 
   const chooseFromCamera = async () => {
-    const response = await launchCamera({
-      mediaType: 'photo',
-      quality: 0.75,
-      saveToPhotos: true
-    });
+    setImageError('');
+    try {
+      const granted = await ensureCameraPermission();
+      if (!granted) {
+        setImageError('Camera permission denied. Please enable in Settings.');
+        return;
+      }
 
-    const uri = response?.assets?.[0]?.uri;
-    if (uri) {
-      setMediaUri(uri);
+      const response = await launchCamera({
+        mediaType: 'photo',
+        quality: 0.75,
+        saveToPhotos: true
+      });
+
+      if (response?.didCancel) return;
+
+      if (response?.errorCode) {
+        setImageError(response.errorMessage || 'Camera error. Please try again.');
+        return;
+      }
+
+      const uri = response?.assets?.[0]?.uri;
+      if (uri) {
+        setMediaUri(uri);
+      }
+    } catch (error) {
+      setImageError('Failed to open camera. Check permissions and try again.');
     }
   };
 
   const chooseFromLibrary = async () => {
-    const response = await launchImageLibrary({
-      mediaType: 'photo',
-      quality: 0.75,
-      selectionLimit: 1
-    });
+    setImageError('');
+    try {
+      const granted = await ensureCameraPermission();
+      if (!granted) {
+        setImageError('Gallery permission denied. Please enable in Settings.');
+        return;
+      }
 
-    const uri = response?.assets?.[0]?.uri;
-    if (uri) {
-      setMediaUri(uri);
+      const response = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.75,
+        selectionLimit: 1
+      });
+
+      if (response?.didCancel) return;
+
+      if (response?.errorCode) {
+        setImageError(response.errorMessage || 'Gallery error. Please try again.');
+        return;
+      }
+
+      const uri = response?.assets?.[0]?.uri;
+      if (uri) {
+        setMediaUri(uri);
+      }
+    } catch (error) {
+      setImageError('Failed to open gallery. Check permissions and try again.');
     }
   };
 
   const handleSubmit = async () => {
-    if (!location) {
-      return;
-    }
+    if (!location) return;
 
     const media = [mediaUri, mediaUrl].filter(Boolean);
 
-    await onSubmit({
-      source: 'user',
-      type: category,
-      description,
-      latitude: location[1],
-      longitude: location[0],
-      media_urls: media,
-      reporter_id: anonymous ? 'anonymous' : 'user-mobile'
-    });
+    try {
+      await onSubmit({
+        source: 'user',
+        type: category,
+        description,
+        latitude: location[1],
+        longitude: location[0],
+        media_urls: media,
+        reporter_id: anonymous ? 'anonymous' : 'user-mobile'
+      });
 
-    resetAndClose();
+      resetAndClose();
+    } catch (error) {
+      Alert.alert('Submit Failed', 'Could not submit report. Please check your connection and try again.');
+    }
   };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={resetAndClose} transparent>
       <View style={styles.overlay}>
         <View style={styles.sheet}>
-          <Text style={styles.title}>Report Incident</Text>
-          <Text style={styles.subtitle}>Step {step} of 3</Text>
+          <View style={styles.headerRow}>
+            <Text style={styles.title}>Report Incident</Text>
+            <View style={styles.stepBadge}>
+              <Text style={styles.stepText}>Step {step}/3</Text>
+            </View>
+          </View>
 
           {step === 1 && (
             <View>
-              <Text style={styles.section}>1. Select category</Text>
+              <Text style={styles.section}>Select category</Text>
               <View style={styles.tagsWrap}>
                 {categories.map((item) => (
                   <Pressable
@@ -112,7 +173,7 @@ export default function ReportIncidentModal({ visible, location, onClose, onSubm
 
           {step === 2 && (
             <View>
-              <Text style={styles.section}>2. Capture photo or upload</Text>
+              <Text style={styles.section}>Describe & attach photo</Text>
               <TextInput
                 style={styles.input}
                 value={description}
@@ -123,13 +184,19 @@ export default function ReportIncidentModal({ visible, location, onClose, onSubm
               />
               <View style={styles.mediaActions}>
                 <Pressable style={styles.mediaButton} onPress={chooseFromCamera}>
-                  <Text style={styles.mediaButtonText}>Capture photo</Text>
+                  <Text style={styles.mediaButtonText}>📷 Camera</Text>
                 </Pressable>
                 <Pressable style={styles.mediaButton} onPress={chooseFromLibrary}>
-                  <Text style={styles.mediaButtonText}>Upload photo</Text>
+                  <Text style={styles.mediaButtonText}>🖼 Gallery</Text>
                 </Pressable>
               </View>
+
+              {imageError ? (
+                <Text style={styles.imageErrorText}>{imageError}</Text>
+              ) : null}
+
               {mediaUri ? <Image source={{ uri: mediaUri }} style={styles.preview} /> : null}
+
               <TextInput
                 style={styles.input}
                 value={mediaUrl}
@@ -143,8 +210,10 @@ export default function ReportIncidentModal({ visible, location, onClose, onSubm
 
           {step === 3 && (
             <View>
-              <Text style={styles.section}>3. Confirm GPS location</Text>
-              <Text style={styles.coord}>{location ? `${location[1].toFixed(5)}, ${location[0].toFixed(5)}` : 'Location unavailable'}</Text>
+              <Text style={styles.section}>Confirm location</Text>
+              <Text style={styles.coord}>
+                {location ? `${location[1].toFixed(5)}, ${location[0].toFixed(5)}` : 'Location unavailable'}
+              </Text>
               <View style={styles.row}>
                 <Text style={styles.label}>Submit anonymously</Text>
                 <Switch value={anonymous} onValueChange={setAnonymous} />
@@ -178,34 +247,50 @@ export default function ReportIncidentModal({ visible, location, onClose, onSubm
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (isDarkMode) => StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255, 255, 255, 0.9)',
     justifyContent: 'flex-end'
   },
   sheet: {
-    backgroundColor: '#0f172a',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    backgroundColor: isDarkMode ? '#0a1628' : '#e2e8f0',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: isDarkMode ? '#1e3a5c' : '#e2e8f0',
+    borderBottomWidth: 0,
     paddingHorizontal: 16,
     paddingTop: 18,
-    paddingBottom: 24
+    paddingBottom: 28
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
   },
   title: {
-    color: '#f8fafc',
+    color: isDarkMode ? '#f8fafc' : '#e2e8f0',
     fontSize: 20,
     fontWeight: '800'
   },
-  subtitle: {
-    color: '#9ca3af',
-    marginTop: 4
+  stepBadge: {
+    backgroundColor: isDarkMode ? '#1e3a8a' : '#e2e8f0',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3
+  },
+  stepText: {
+    color: isDarkMode ? '#dbeafe' : '#e2e8f0',
+    fontWeight: '800',
+    fontSize: 11
   },
   section: {
-    color: '#e5e7eb',
+    color: isDarkMode ? '#d1dbe8' : '#e2e8f0',
     marginTop: 16,
     marginBottom: 10,
-    fontWeight: '700'
+    fontWeight: '700',
+    fontSize: 14
   },
   tagsWrap: {
     flexDirection: 'row',
@@ -214,29 +299,30 @@ const styles = StyleSheet.create({
   },
   tag: {
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: isDarkMode ? '#2d4666' : '#e2e8f0',
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8
   },
   tagActive: {
     borderColor: '#f97316',
-    backgroundColor: '#7c2d12'
+    backgroundColor: isDarkMode ? 'rgba(124,45,18,0.6)' : 'rgba(241, 245, 249, 0.9)'
   },
   tagText: {
-    color: '#9ca3af',
-    textTransform: 'capitalize'
+    color: isDarkMode ? '#8faec9' : '#e2e8f0',
+    textTransform: 'capitalize',
+    fontWeight: '600'
   },
   tagTextActive: {
-    color: '#fed7aa',
+    color: isDarkMode ? '#fed7aa' : '#e2e8f0',
     fontWeight: '700'
   },
   input: {
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: isDarkMode ? '#2d4666' : '#e2e8f0',
     borderRadius: 10,
     padding: 12,
-    color: '#f9fafb',
+    color: isDarkMode ? '#f9fafb' : '#e2e8f0',
     marginBottom: 10,
     minHeight: 46
   },
@@ -248,25 +334,31 @@ const styles = StyleSheet.create({
   mediaButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: isDarkMode ? '#2d4f73' : '#e2e8f0',
     borderRadius: 10,
     paddingVertical: 9,
     alignItems: 'center'
   },
   mediaButtonText: {
-    color: '#cbd5e1',
+    color: isDarkMode ? '#cbd5e1' : '#e2e8f0',
     fontWeight: '700'
+  },
+  imageErrorText: {
+    color: isDarkMode ? '#fca5a5' : '#e2e8f0',
+    fontSize: 12,
+    marginBottom: 6
   },
   preview: {
     width: '100%',
     height: 120,
     borderRadius: 10,
     marginBottom: 10,
-    backgroundColor: '#1f2937'
+    backgroundColor: isDarkMode ? '#1f2937' : '#e2e8f0'
   },
   coord: {
-    color: '#d1d5db',
-    marginBottom: 16
+    color: isDarkMode ? '#d1d5db' : '#e2e8f0',
+    marginBottom: 16,
+    fontWeight: '600'
   },
   row: {
     flexDirection: 'row',
@@ -274,36 +366,39 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   label: {
-    color: '#e5e7eb',
+    color: isDarkMode ? '#e5e7eb' : '#e2e8f0',
     fontWeight: '600'
   },
   actions: {
     marginTop: 18,
     flexDirection: 'row',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    gap: 10
   },
   secondary: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: isDarkMode ? '#2d4666' : '#e2e8f0',
     borderRadius: 10,
     paddingVertical: 10,
-    paddingHorizontal: 18
+    alignItems: 'center'
   },
   secondaryText: {
-    color: '#cbd5e1',
+    color: isDarkMode ? '#cbd5e1' : '#e2e8f0',
     fontWeight: '700'
   },
   primary: {
-    backgroundColor: '#ef4444',
+    flex: 1,
+    backgroundColor: isDarkMode ? '#1e40af' : '#e2e8f0',
     borderRadius: 10,
     paddingVertical: 10,
-    paddingHorizontal: 18
+    alignItems: 'center'
   },
   primaryDisabled: {
-    opacity: 0.45
+    opacity: 0.4
   },
   primaryText: {
-    color: '#fff',
+    color: isDarkMode ? '#fff' : '#e2e8f0',
     fontWeight: '800'
   }
 });

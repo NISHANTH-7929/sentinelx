@@ -1,6 +1,7 @@
-﻿import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import { ThemeContext } from '../theme/ThemeContext';
 
 export default function RegionSelectorPanel({
   states,
@@ -11,65 +12,96 @@ export default function RegionSelectorPanel({
   area,
   onStateChange,
   onDistrictChange,
-  onAreaChange
+  onAreaChange,
+  containerStyle
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { isDarkMode } = useContext(ThemeContext);
+
+  const colors = isDarkMode
+    ? {
+        bg: 'rgba(8,23,39,0.92)',
+        border: 'rgba(120,170,220,0.32)',
+        textMain: '#f3f9ff',
+        textSub: '#8ab3db',
+        fieldBg: 'rgba(8,34,58,0.65)',
+        fieldBorder: '#1f3a5c',
+        pickerText: '#cfe7ff'
+      }
+    : {
+        bg: 'rgba(255,255,255,0.92)',
+        border: 'rgba(180,200,220,0.6)',
+        textMain: '#0f172a',
+        textSub: '#475569',
+        fieldBg: 'rgba(241,245,249,0.65)',
+        fieldBorder: '#cbd5e1',
+        pickerText: '#1e293b'
+      };
 
   return (
-    <View style={styles.panel}>
+    <View style={[styles.panel, { backgroundColor: colors.bg, borderColor: colors.border }, containerStyle]}>
       <Pressable onPress={() => setExpanded(!expanded)} style={styles.header}>
-        <Text style={styles.title}>Region Intelligence Filter</Text>
-        <Text style={styles.toggleIcon}>{expanded ? '▲' : '▼'}</Text>
+        <Text style={[styles.title, { color: colors.textMain }]}>Region Intelligence Filter</Text>
+        <Text style={[styles.toggleIcon, { color: colors.textMain }]}>{expanded ? '▲' : '▼'}</Text>
       </Pressable>
 
-      {expanded && (
+      {expanded ? (
         <View style={styles.content}>
-          <View style={styles.field}>
-            <Text style={styles.label}>State</Text>
-            <Picker selectedValue={state} onValueChange={onStateChange} style={styles.picker} dropdownIconColor="#cfe7ff">
+          <View style={[styles.field, { backgroundColor: colors.fieldBg, borderColor: colors.fieldBorder }]}>
+            <Text style={[styles.label, { color: colors.textSub }]}>State</Text>
+            <Picker
+              selectedValue={state}
+              onValueChange={onStateChange}
+              style={[styles.picker, { color: colors.pickerText }]}
+              dropdownIconColor={colors.pickerText}>
               {states.map((item) => (
-                <Picker.Item key={item} label={item} value={item} color="#cfe7ff" />
+                <Picker.Item key={item} label={item} value={item} color={colors.pickerText} />
               ))}
             </Picker>
           </View>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>District</Text>
-            <Picker selectedValue={district} onValueChange={onDistrictChange} style={styles.picker} dropdownIconColor="#cfe7ff">
+          <View style={[styles.field, { backgroundColor: colors.fieldBg, borderColor: colors.fieldBorder }]}>
+            <Text style={[styles.label, { color: colors.textSub }]}>District</Text>
+            <Picker
+              selectedValue={district}
+              onValueChange={onDistrictChange}
+              style={[styles.picker, { color: colors.pickerText }]}
+              dropdownIconColor={colors.pickerText}>
               {districts.map((item) => (
-                <Picker.Item key={item} label={item} value={item} color="#cfe7ff" />
+                <Picker.Item key={item} label={item} value={item} color={colors.pickerText} />
               ))}
             </Picker>
           </View>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Area</Text>
-            <Picker selectedValue={area} onValueChange={onAreaChange} style={styles.picker} dropdownIconColor="#cfe7ff">
+          <View style={[styles.field, { backgroundColor: colors.fieldBg, borderColor: colors.fieldBorder }]}>
+            <Text style={[styles.label, { color: colors.textSub }]}>Area</Text>
+            <Picker
+              selectedValue={area}
+              onValueChange={onAreaChange}
+              style={[styles.picker, { color: colors.pickerText }]}
+              dropdownIconColor={colors.pickerText}>
               {areas.map((item) => (
-                <Picker.Item key={item} label={item} value={item} color="#cfe7ff" />
+                <Picker.Item key={item} label={item} value={item} color={colors.pickerText} />
               ))}
             </Picker>
           </View>
         </View>
-      )}
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   panel: {
-    marginTop: 38,
     marginHorizontal: 12,
-    backgroundColor: 'rgba(8,23,39,0.86)',
-    borderColor: 'rgba(120,170,220,0.32)',
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
     elevation: 8
   },
   header: {
@@ -82,23 +114,18 @@ const styles = StyleSheet.create({
     marginTop: 8
   },
   title: {
-    color: '#f3f9ff',
     fontWeight: '700'
   },
   toggleIcon: {
-    color: '#f3f9ff',
     fontSize: 12
   },
   field: {
     marginTop: 4,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#1f3a5c',
-    overflow: 'hidden',
-    backgroundColor: 'rgba(8,34,58,0.65)'
+    overflow: 'hidden'
   },
   label: {
-    color: '#8ab3db',
     fontSize: 11,
     fontWeight: '700',
     marginLeft: 10,
@@ -107,7 +134,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8
   },
   picker: {
-    color: '#cfe7ff',
     marginTop: -8,
     marginBottom: -8
   }

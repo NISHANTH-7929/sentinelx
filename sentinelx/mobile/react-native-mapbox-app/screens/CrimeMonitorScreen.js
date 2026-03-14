@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import Geolocation from '@react-native-community/geolocation';
 import {
   Animated,
   Easing,
@@ -12,12 +13,12 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import Mapbox from '@rnmapbox/maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+import { ThemeContext } from '../theme/ThemeContext';
 import AreaSearchModal from '../components/AreaSearchModal';
 import CrimeFilterDrawer from '../components/CrimeFilterDrawer';
 import CrimeIncidentDetailsModal from '../components/CrimeIncidentDetailsModal';
 import CrimeMonitorStatsScreen from './CrimeMonitorStatsScreen';
-import { useUserLocation } from '../hooks/useUserLocation';
+
 import { MAPBOX_ACCESS_TOKEN } from '../services/config';
 import {
   buildMicrozoneTiles,
@@ -32,6 +33,7 @@ import {
 } from '../services/crimeMonitorData';
 import {
   DEFAULT_REGION,
+  findAreaByCoordinate,
   getAreaConfig,
   getAreas,
   getDistricts,
@@ -41,11 +43,16 @@ import {
 Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
 
 const SCORE_HELP_TEXT =
-  'Safety Score (0-100) combines number of incidents and severity for the selected area and time window. Higher score means safer area.';
+  'Safety Score (0–100) combines incident count and severity for the selected area and time window. Higher = safer.';
 
 const DEFAULT_SCAN_RADIUS_METERS = 250;
 const SCAN_RADIUS_OPTIONS = [100, 250, 400, 800];
 const EMPTY_FEATURE_COLLECTION = { type: 'FeatureCollection', features: [] };
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
+// Current month: March 2026 = index 2
+const CURRENT_MONTH_INDEX = 2;
 
 const initialWeek = () => {
   const day = new Date().getDate();
@@ -55,104 +62,92 @@ const initialWeek = () => {
   return 4;
 };
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-
-const layerToggleStyle = (active) => [styles.layerToggle, active && styles.layerToggleActive];
-
-const zoneFillStyle = {
-  fillColor: ['get', 'color'],
-  fillOpacity: 0.22
+const changeArrow = (value) => {
+  if (value > 0) return `↑ +${Math.abs(value)}%`;
+  if (value < 0) return `↓ ${value}%`;
+  return '— No change';
 };
 
-const zoneLineStyle = {
-  lineColor: '#1b3959',
-  lineWidth: 0.8,
-  lineOpacity: 0.5
-};
-
-const heatmapLayerStyle = {
-  heatmapWeight: ['match', ['get', 'severity'], 'Critical', 1, 'High', 0.8, 'Medium', 0.5, 0.3],
-  heatmapIntensity: ['interpolate', ['linear'], ['zoom'], 8, 1.2, 14, 3.2],
-  heatmapColor: [
-    'interpolate',
-    ['linear'],
-    ['heatmap-density'],
-    0,
-    'rgba(22,163,74,0)',
-    0.3,
-    '#16a34a',
-    0.5,
-    '#eab308',
-    0.75,
-    '#f97316',
-    1,
-    '#dc2626'
-  ],
-  heatmapRadius: ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 36],
-  heatmapOpacity: 0.78
-};
-
-const markerLayerStyle = {
-  circleColor: ['get', 'color'],
-  circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 4, 14, 8],
-  circleStrokeColor: '#f5f9ff',
-  circleStrokeWidth: 1,
-  circleOpacity: 0.9
+const changeColor = (value) => {
+  if (value > 0) return '#fca5a5';
+  if (value < 0) return '#86efac';
+  return '#94a3b8';
 };
 
 const toggleCategory = (current, key) => {
-  if (key === 'all') {
-    return ['all'];
-  }
-
+  if (key === 'all') return ['all'];
   const withoutAll = current.filter((item) => item !== 'all');
   const exists = withoutAll.includes(key);
-
   if (exists) {
     const next = withoutAll.filter((item) => item !== key);
     return next.length ? next : ['all'];
   }
-
   return [...withoutAll, key];
 };
 
 const createCirclePolygon = ([lng, lat], radiusMeters = DEFAULT_SCAN_RADIUS_METERS, points = 64) => {
   const latDelta = radiusMeters / 111320;
   const lngDelta = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
-
   const coordinates = [];
   for (let i = 0; i <= points; i += 1) {
     const angle = (i / points) * Math.PI * 2;
-    coordinates.push([
-      lng + lngDelta * Math.cos(angle),
-      lat + latDelta * Math.sin(angle)
-    ]);
+    coordinates.push([lng + lngDelta * Math.cos(angle), lat + latDelta * Math.sin(angle)]);
   }
-
   return {
     type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        geometry: {
-          type: 'Polygon',
-          coordinates: [coordinates]
-        }
-      }
-    ]
+    features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [coordinates] } }]
   };
+};
+
+const zoneFillStyle = { fillColor: ['get', 'color'], fillOpacity: 0.2 };
+const zoneLineStyle = { lineColor: '#1b3959', lineWidth: 0.7, lineOpacity: 0.45 };
+
+const heatmapLayerStyle = {
+  heatmapWeight: ['match', ['get', 'severity'], 'Critical', 1, 'High', 0.8, 'Medium', 0.5, 0.3],
+  heatmapIntensity: ['interpolate', ['linear'], ['zoom'], 8, 1.2, 14, 3.2],
+  heatmapColor: [
+    'interpolate', ['linear'], ['heatmap-density'],
+    0, 'rgba(22,163,74,0)',
+    0.3, '#16a34a',
+    0.5, '#eab308',
+    0.75, '#f97316',
+    1, '#dc2626'
+  ],
+  heatmapRadius: ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 34],
+  heatmapOpacity: 0.75
+};
+
+const markerLayerStyle = {
+  circleColor: ['get', 'color'],
+  circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 7],
+  circleStrokeColor: '#f5f9ff',
+  circleStrokeWidth: 1,
+  circleOpacity: 0.9
 };
 
 export default function CrimeMonitorScreen() {
   const cameraRef = useRef(null);
   const insets = useSafeAreaInsets();
-  const { coordinate: userCoordinate } = useUserLocation();
+  const { isDarkMode } = useContext(ThemeContext);
+  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode]);
+  const [userCoordinate, setUserCoordinate] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    Geolocation.getCurrentPosition(
+      (pos) => {
+        if (!cancelled) setUserCoordinate([pos.coords.longitude, pos.coords.latitude]);
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
+    return () => { cancelled = true; };
+  }, []);
 
   const [selectedState, setSelectedState] = useState(DEFAULT_REGION.state);
   const [selectedDistrict, setSelectedDistrict] = useState(DEFAULT_REGION.district);
   const [selectedArea, setSelectedArea] = useState(DEFAULT_REGION.area);
 
-  const [monthIndex, setMonthIndex] = useState(new Date().getMonth());
+  const [monthIndex, setMonthIndex] = useState(CURRENT_MONTH_INDEX);
   const [weekIndex, setWeekIndex] = useState(initialWeek());
 
   const [categories, setCategories] = useState(['all']);
@@ -162,14 +157,13 @@ export default function CrimeMonitorScreen() {
 
   const [showAreaSearch, setShowAreaSearch] = useState(false);
   const [filterVisible, setFilterVisible] = useState(false);
-  const [showLegend, setShowLegend] = useState(true);
+  const [showLegend, setShowLegend] = useState(false);
   const [showMicrozones, setShowMicrozones] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showMarkers, setShowMarkers] = useState(true);
   const [showStats, setShowStats] = useState(false);
   const [showScoreHelp, setShowScoreHelp] = useState(false);
   const [showControls, setShowControls] = useState(false);
-  const [showHud, setShowHud] = useState(false);
 
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [tapSummary, setTapSummary] = useState(null);
@@ -183,7 +177,7 @@ export default function CrimeMonitorScreen() {
       state: DEFAULT_REGION.state,
       district: DEFAULT_REGION.district,
       area: DEFAULT_REGION.area,
-      monthIndex: new Date().getMonth(),
+      monthIndex: CURRENT_MONTH_INDEX,
       weekIndex: initialWeek(),
       selectedCategories: ['all'],
       severityGradedOnly: false
@@ -210,13 +204,9 @@ export default function CrimeMonitorScreen() {
   );
 
   const focusRadiusOverlay = useMemo(() => {
-    if (!focusCoordinate) {
-      return EMPTY_FEATURE_COLLECTION;
-    }
+    if (!focusCoordinate) return EMPTY_FEATURE_COLLECTION;
     return createCirclePolygon(focusCoordinate, scanRadiusMeters);
   }, [focusCoordinate, scanRadiusMeters]);
-
-  const mapTitle = `Crime Monitor - ${selectedState} / ${selectedDistrict} / ${selectedArea} - ${MONTH_LABELS[monthIndex]}`;
 
   const loadSnapshot = useCallback(() => {
     const next = getCrimeSnapshot({
@@ -237,9 +227,7 @@ export default function CrimeMonitorScreen() {
     setFocusCoordinate(nextAreaConfig.center);
   }, []);
 
-  useEffect(() => {
-    loadSnapshot();
-  }, [loadSnapshot]);
+  useEffect(() => { loadSnapshot(); }, [loadSnapshot]);
 
   useEffect(() => {
     if (followCurrentLocation && userCoordinate) {
@@ -267,36 +255,27 @@ export default function CrimeMonitorScreen() {
       setTapSummary(null);
       return;
     }
-
     const summary = nearbySummary({
       incidents: snapshot.incidents,
       coordinate: focusCoordinate,
       radiusMeters: scanRadiusMeters
     });
-
-    setTapSummary(
-      summary
-        ? {
-            coordinate: focusCoordinate,
-            ...summary
-          }
-        : null
-    );
+    setTapSummary(summary ? { coordinate: focusCoordinate, ...summary } : null);
   }, [focusCoordinate, scanRadiusMeters, snapshot.incidents]);
 
   useEffect(() => {
     Animated.timing(summaryAnim, {
-      toValue: tapSummary && showHud ? 1 : 0,
+      toValue: tapSummary ? 1 : 0,
       duration: 220,
       easing: Easing.out(Easing.quad),
       useNativeDriver: true
     }).start();
-  }, [showHud, summaryAnim, tapSummary]);
+  }, [summaryAnim, tapSummary]);
 
   useEffect(() => {
     Animated.timing(statsAnim, {
       toValue: showStats ? 1 : 0,
-      duration: 260,
+      duration: 240,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true
     }).start();
@@ -319,55 +298,44 @@ export default function CrimeMonitorScreen() {
     setDraftSeverityOnly(severityGradedOnly);
     setFilterVisible(true);
     Animated.timing(filterAnim, {
-      toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true
+      toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true
     }).start();
   };
 
   const closeFilter = () => {
     Animated.timing(filterAnim, {
-      toValue: 0,
-      duration: 220,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true
-    }).start(({ finished }) => {
-      if (finished) {
-        setFilterVisible(false);
-      }
-    });
+      toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true
+    }).start(({ finished }) => { if (finished) setFilterVisible(false); });
   };
 
   const onMapPress = (event) => {
     const incidentId = event?.features?.find((item) => item?.properties?.incidentId)?.properties?.incidentId;
     if (incidentId) {
       const found = snapshot.incidents.find((item) => item.id === incidentId);
-      if (found) {
-        setSelectedIncident(found);
-      }
+      if (found) setSelectedIncident(found);
       return;
     }
-
     const coords = event?.geometry?.coordinates;
-    if (!coords) {
-      return;
-    }
-
+    if (!coords) return;
     setFollowCurrentLocation(false);
     setFocusCoordinate(coords);
-    setShowHud(true);
+
+    // Auto-update State / District / Area selectors to match the tapped location
+    const foundRegion = findAreaByCoordinate(coords[0], coords[1]);
+    if (foundRegion) {
+      setSelectedState(foundRegion.state);
+      setSelectedDistrict(foundRegion.district);
+      setSelectedArea(foundRegion.area);
+      // Move focus to the matched area center so crime data refreshes for it
+      moveFocusToArea(foundRegion.state, foundRegion.district, foundRegion.area);
+    }
   };
 
   const onPinDragEnd = (event) => {
     const coords = event?.geometry?.coordinates;
-    if (!coords) {
-      return;
-    }
-
+    if (!coords) return;
     setFollowCurrentLocation(false);
     setFocusCoordinate(coords);
-    setShowHud(true);
   };
 
   const recenterToCurrentLocation = () => {
@@ -376,7 +344,6 @@ export default function CrimeMonitorScreen() {
       setFocusCoordinate(userCoordinate);
       return;
     }
-
     setFollowCurrentLocation(false);
     setFocusCoordinate(areaConfig.center);
   };
@@ -405,64 +372,35 @@ export default function CrimeMonitorScreen() {
     <View style={styles.container}>
       <Mapbox.MapView
         style={StyleSheet.absoluteFillObject}
-        styleURL={Mapbox.StyleURL.Street}
+        styleURL={isDarkMode ? Mapbox.StyleURL.TrafficNight : Mapbox.StyleURL.Street}
         logoEnabled={false}
         attributionEnabled={false}
         compassEnabled
         onPress={onMapPress}>
         <Mapbox.Camera
           ref={cameraRef}
-          defaultSettings={{
-            centerCoordinate: areaConfig.center,
-            zoomLevel: 12.4
-          }}
+          defaultSettings={{ centerCoordinate: areaConfig.center, zoomLevel: 12.4 }}
         />
 
         {showMicrozones ? (
           <Mapbox.ShapeSource id="crime-zones-source" shape={microzoneCollection}>
-            <Mapbox.FillLayer
-              id="crime-zones-fill"
-              style={zoneFillStyle}
-            />
-            <Mapbox.LineLayer
-              id="crime-zones-outline"
-              style={zoneLineStyle}
-            />
+            <Mapbox.FillLayer id="crime-zones-fill" style={zoneFillStyle} />
+            <Mapbox.LineLayer id="crime-zones-outline" style={zoneLineStyle} />
           </Mapbox.ShapeSource>
         ) : null}
 
         <Mapbox.ShapeSource id="crime-incidents-source" shape={incidentCollection} onPress={onMapPress}>
           {showHeatmap ? (
-            <Mapbox.HeatmapLayer
-              id="crime-heatmap"
-              style={heatmapLayerStyle}
-            />
+            <Mapbox.HeatmapLayer id="crime-heatmap" style={heatmapLayerStyle} />
           ) : null}
-
           {showMarkers ? (
-            <Mapbox.CircleLayer
-              id="crime-markers"
-              style={markerLayerStyle}
-            />
+            <Mapbox.CircleLayer id="crime-markers" style={markerLayerStyle} />
           ) : null}
         </Mapbox.ShapeSource>
 
         <Mapbox.ShapeSource id="focus-radius-source" shape={focusRadiusOverlay}>
-          <Mapbox.FillLayer
-            id="focus-radius-fill"
-            style={{
-              fillColor: '#60a5fa',
-              fillOpacity: 0.12
-            }}
-          />
-          <Mapbox.LineLayer
-            id="focus-radius-line"
-            style={{
-              lineColor: '#60a5fa',
-              lineWidth: 2,
-              lineOpacity: 0.85
-            }}
-          />
+          <Mapbox.FillLayer id="focus-radius-fill" style={{ fillColor: '#60a5fa', fillOpacity: 0.1 }} />
+          <Mapbox.LineLayer id="focus-radius-line" style={{ lineColor: '#60a5fa', lineWidth: 2, lineOpacity: 0.8, lineDasharray: [3, 2] }} />
         </Mapbox.ShapeSource>
 
         {focusCoordinate ? (
@@ -474,14 +412,22 @@ export default function CrimeMonitorScreen() {
         ) : null}
       </Mapbox.MapView>
 
-      <Pressable style={[styles.controlsToggle, { top: insets.top + 8 }]} onPress={() => setShowControls((prev) => !prev)}>
-        <Text style={styles.controlsToggleText}>{showControls ? 'Hide Controls' : 'Show Controls'}</Text>
+      {/* Toggle controls button */}
+      <Pressable style={[
+        styles.controlsToggle,
+        { top: insets.top + 8, backgroundColor: isDarkMode ? 'rgba(15,55,90,0.94)' : 'rgba(255,255,255,0.96)', borderColor: isDarkMode ? '#4a90c7' : '#94a3b8' }
+      ]} onPress={() => setShowControls((prev) => !prev)}>
+        <Text style={[styles.controlsToggleText, { color: isDarkMode ? '#eff8ff' : '#0f172a' }]}>{showControls ? 'Hide Controls' : 'Controls'}</Text>
       </Pressable>
 
+      {/* Controls panel */}
       {showControls ? (
-        <View style={[styles.topPanel, { top: insets.top + 52 }]}>
+        <ScrollView style={[
+          styles.topPanel,
+          { top: insets.top + 48, backgroundColor: isDarkMode ? 'rgba(7,22,40,0.92)' : 'rgba(255,255,255,0.96)', borderColor: isDarkMode ? 'rgba(80,130,180,0.4)' : 'rgba(150,180,210,0.6)' }
+        ]} nestedScrollEnabled>
           <View style={styles.selectorRow}>
-            <View style={styles.selectorField}>
+            <View style={[styles.selectorField, { backgroundColor: isDarkMode ? 'rgba(9,35,60,0.85)' : 'rgba(248,250,252,0.9)', borderColor: isDarkMode ? '#2a4d70' : '#cbd5e1' }]}>
               <Text style={styles.fieldLabel}>State</Text>
               <Picker
                 selectedValue={selectedState}
@@ -501,7 +447,7 @@ export default function CrimeMonitorScreen() {
               </Picker>
             </View>
 
-            <View style={styles.selectorField}>
+            <View style={[styles.selectorField, { backgroundColor: isDarkMode ? 'rgba(9,35,60,0.85)' : 'rgba(248,250,252,0.9)', borderColor: isDarkMode ? '#2a4d70' : '#cbd5e1' }]}>
               <Text style={styles.fieldLabel}>District</Text>
               <Picker
                 selectedValue={selectedDistrict}
@@ -519,12 +465,13 @@ export default function CrimeMonitorScreen() {
               </Picker>
             </View>
 
-            <Pressable style={styles.areaPickerButton} onPress={() => setShowAreaSearch(true)}>
-              <Text style={styles.fieldLabel}>Area / Zone</Text>
+            <Pressable style={[styles.areaPickerButton, { backgroundColor: isDarkMode ? 'rgba(9,35,60,0.85)' : 'rgba(248,250,252,0.9)', borderColor: isDarkMode ? '#2a4d70' : '#cbd5e1' }]} onPress={() => setShowAreaSearch(true)}>
+              <Text style={styles.fieldLabel}>Area</Text>
               <Text style={styles.areaPickerText} numberOfLines={1}>{selectedArea}</Text>
             </Pressable>
           </View>
 
+          {/* Year + Month */}
           <View style={styles.timeControls}>
             <View style={styles.yearPill}>
               <Text style={styles.yearLabel}>{meta.year}</Text>
@@ -534,9 +481,9 @@ export default function CrimeMonitorScreen() {
               {MONTH_LABELS.map((month, index) => (
                 <Pressable
                   key={month}
-                  style={[styles.monthChip, monthIndex === index && styles.monthChipActive]}
+                  style={[styles.chip, monthIndex === index && styles.chipActive]}
                   onPress={() => setMonthIndex(index)}>
-                  <Text style={[styles.monthChipText, monthIndex === index && styles.monthChipTextActive]}>{month}</Text>
+                  <Text style={[styles.chipText, monthIndex === index && styles.chipTextActive]}>{month}</Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -547,74 +494,82 @@ export default function CrimeMonitorScreen() {
                   key={`week-${week}`}
                   style={[styles.weekChip, weekIndex === week && styles.weekChipActive]}
                   onPress={() => setWeekIndex(week)}>
-                  <Text style={[styles.weekChipText, weekIndex === week && styles.weekChipTextActive]}>{`Week ${week}`}</Text>
+                  <Text style={[styles.chipText, weekIndex === week && styles.chipTextActive]}>{`W${week}`}</Text>
                 </Pressable>
               ))}
             </View>
           </View>
 
-          <View style={styles.mapTitleRow}>
-            <Text style={styles.mapTitle} numberOfLines={2}>{mapTitle}</Text>
-            <View style={styles.actionsRow}>
-              <Pressable style={styles.headerButton} onPress={refreshData}>
-                <Text style={styles.headerButtonText}>Refresh</Text>
-              </Pressable>
-              <Pressable style={styles.headerButton} onPress={() => setShowStats(true)}>
-                <Text style={styles.headerButtonText}>Statistics</Text>
-              </Pressable>
-            </View>
+          {/* Actions row */}
+          <View style={styles.actionsRow}>
+            <Pressable style={styles.actionBtn} onPress={refreshData}>
+              <Text style={styles.actionBtnText}>Refresh</Text>
+            </Pressable>
+            <Pressable style={styles.actionBtn} onPress={() => setShowStats(true)}>
+              <Text style={styles.actionBtnText}>Statistics</Text>
+            </Pressable>
+            <Pressable style={styles.actionBtn} onPress={recenterToCurrentLocation}>
+              <Text style={styles.actionBtnText}>My Location</Text>
+            </Pressable>
           </View>
 
+          {/* Radius + layers */}
           <View style={styles.radiusRow}>
             {SCAN_RADIUS_OPTIONS.map((radius) => (
               <Pressable
                 key={`radius-${radius}`}
-                style={[styles.monthChip, scanRadiusMeters === radius && styles.monthChipActive]}
+                style={[styles.chip, scanRadiusMeters === radius && styles.chipActive]}
                 onPress={() => setScanRadiusMeters(radius)}>
-                <Text style={[styles.monthChipText, scanRadiusMeters === radius && styles.monthChipTextActive]}>{`${radius}m`}</Text>
+                <Text style={[styles.chipText, scanRadiusMeters === radius && styles.chipTextActive]}>{`${radius}m`}</Text>
               </Pressable>
             ))}
-            <Pressable style={styles.headerButton} onPress={recenterToCurrentLocation}>
-              <Text style={styles.headerButtonText}>My Location</Text>
-            </Pressable>
           </View>
 
           <View style={styles.layerRow}>
-            <Pressable style={layerToggleStyle(showMicrozones)} onPress={() => setShowMicrozones((prev) => !prev)}>
-              <Text style={styles.layerToggleText}>Microzone tiles</Text>
+            <Pressable style={[styles.layerToggle, showMicrozones && styles.layerToggleActive]} onPress={() => setShowMicrozones((prev) => !prev)}>
+              <Text style={styles.layerToggleText}>Microzones</Text>
             </Pressable>
-            <Pressable style={layerToggleStyle(showHeatmap)} onPress={() => setShowHeatmap((prev) => !prev)}>
+            <Pressable style={[styles.layerToggle, showHeatmap && styles.layerToggleActive]} onPress={() => setShowHeatmap((prev) => !prev)}>
               <Text style={styles.layerToggleText}>Heatmap</Text>
             </Pressable>
-            <Pressable style={layerToggleStyle(showMarkers)} onPress={() => setShowMarkers((prev) => !prev)}>
+            <Pressable style={[styles.layerToggle, showMarkers && styles.layerToggleActive]} onPress={() => setShowMarkers((prev) => !prev)}>
               <Text style={styles.layerToggleText}>Markers</Text>
             </Pressable>
-            <Pressable style={layerToggleStyle(showLegend)} onPress={() => setShowLegend((prev) => !prev)}>
+            <Pressable style={[styles.layerToggle, showLegend && styles.layerToggleActive]} onPress={() => setShowLegend((prev) => !prev)}>
               <Text style={styles.layerToggleText}>Legend</Text>
             </Pressable>
           </View>
-        </View>
+        </ScrollView>
       ) : null}
 
-      <View style={[styles.scoreCardMini, !showHud && styles.hiddenOverlay]}>
+      {/* Safety Score Card – always visible at bottom */}
+      <View style={[styles.scoreCard, { bottom: insets.bottom + 140, backgroundColor: isDarkMode ? 'rgba(7,26,46,0.92)' : 'rgba(255,255,255,0.97)', borderColor: isDarkMode ? '#2d5a84' : '#c8d8ea' }]}>
         <View style={[styles.scoreBand, { backgroundColor: snapshot.currentBand.color }]} />
         <View style={styles.scoreTextWrap}>
-          <Text style={styles.scoreTitle}>{`Safety Score ${snapshot.currentScore}`}</Text>
-          <Text style={styles.scoreMeta}>{`${snapshot.currentBand.label} | Last week ${snapshot.previousScore}`}</Text>
+          <Text style={[styles.scoreTitle, { color: isDarkMode ? '#edf7ff' : '#0f172a' }]}>{`Safety Score: ${snapshot.currentScore}`}</Text>
+          <View style={styles.scoreMetaRow}>
+            <Text style={[styles.scoreMeta, { color: isDarkMode ? '#99bbd6' : '#475569' }]}>{`${snapshot.currentBand.label}`}</Text>
+            <Text style={[styles.scoreMeta, { color: isDarkMode ? '#99bbd6' : '#475569' }]}>{` · Last week: ${snapshot.previousScore}`}</Text>
+            <Text style={[styles.scoreChange, { color: changeColor(snapshot.scoreChangePct) }]}>
+              {` ${changeArrow(snapshot.scoreChangePct)}`}
+            </Text>
+          </View>
         </View>
         <Pressable style={styles.infoButton} onPress={() => setShowScoreHelp((prev) => !prev)}>
-          <Text style={styles.infoText}>How calculated?</Text>
+          <Text style={styles.infoText}>ⓘ</Text>
         </Pressable>
       </View>
 
-      {showHud && showScoreHelp ? (
-        <View style={styles.helpTooltip}>
+      {/* Score help tooltip */}
+      {showScoreHelp ? (
+        <View style={[styles.helpTooltip, { bottom: insets.bottom + 220 }]}>
           <Text style={styles.helpText}>{SCORE_HELP_TEXT}</Text>
         </View>
       ) : null}
 
-      {showHud && showLegend ? (
-        <View style={styles.legendCard}>
+      {/* Legend */}
+      {showLegend ? (
+        <View style={[styles.legendCard, { bottom: insets.bottom + 220 }]}>
           {SCORE_BANDS.map((band) => (
             <View key={band.label} style={styles.legendRow}>
               <View style={[styles.legendDot, { backgroundColor: band.color }]} />
@@ -624,52 +579,46 @@ export default function CrimeMonitorScreen() {
         </View>
       ) : null}
 
-      <View style={[styles.sourcePanel, !showHud && styles.hiddenOverlay]}>
-        <Text style={styles.sourceText}>{meta.sourcesText}</Text>
-        <Text style={styles.updatedText}>{`Last updated: ${new Date(meta.lastUpdatedAt).toLocaleString()}`}</Text>
+      {/* Source info */}
+      <View style={[styles.sourcePanel, { bottom: insets.bottom + 84, backgroundColor: isDarkMode ? 'rgba(6,22,38,0.88)' : 'rgba(255,255,255,0.95)', borderColor: isDarkMode ? '#254563' : '#c8d8ea' }]}>
+        <Text style={[styles.sourceText, {color: isDarkMode ? '#7a9cb8' : '#64748b'}]} numberOfLines={2}>{meta.sourcesText}</Text>
       </View>
 
+      {/* FAB column */}
       <View style={[styles.fabColumn, { bottom: insets.bottom + 84 }]}>
-        <Pressable style={[styles.fabSecondary, showHud && styles.fabSecondaryActive]} onPress={() => setShowHud((prev) => !prev)}>
-          <Text style={styles.fabSecondaryText}>{showHud ? 'Hide UI' : 'Show UI'}</Text>
-        </Pressable>
-        <Pressable style={styles.fab} onPress={openFilter}>
+        <Pressable style={[styles.fab, { backgroundColor: isDarkMode ? '#1a4e7a' : '#1e40af', borderColor: isDarkMode ? '#5a9fd4' : '#3b82f6' }]} onPress={openFilter}>
           <Text style={styles.fabText}>Filters</Text>
         </Pressable>
       </View>
 
-      {showHud && tapSummary ? (
+      {/* Tap summary */}
+      {tapSummary ? (
         <Animated.View
           style={[
             styles.tapSummary,
+            { bottom: insets.bottom + 210, backgroundColor: isDarkMode ? 'rgba(8,30,52,0.94)' : 'rgba(255,255,255,0.97)', borderColor: isDarkMode ? '#3d6d9a' : '#c8d8ea' },
             {
               opacity: summaryAnim,
-              transform: [
-                {
-                  translateY: summaryAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [26, 0]
-                  })
-                }
-              ]
+              transform: [{
+                translateY: summaryAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] })
+              }]
             }
           ]}>
-          <Text style={styles.tapTitle}>Location Summary</Text>
+          <Text style={styles.tapTitle}>Location Scan</Text>
           <Text style={styles.tapMeta}>{`${tapSummary.count} incidents in ${scanRadiusMeters}m`}</Text>
-          <Text style={styles.tapMeta}>{`Dominant crime: ${tapSummary.dominantCrimeType}`}</Text>
-          <Text style={styles.tapMeta}>{`Safety score: ${tapSummary.score}`}</Text>
-          <Pressable
-            style={styles.tapButton}
-            onPress={() => {
-              if (tapSummary.incidents?.length) {
-                setSelectedIncident(tapSummary.incidents[0]);
-              }
-            }}>
-            <Text style={styles.tapButtonText}>View Details</Text>
-          </Pressable>
+          <Text style={styles.tapMeta}>{`Top crime: ${tapSummary.dominantCrimeType}`}</Text>
+          <Text style={styles.tapMeta}>{`Score: ${tapSummary.score}`}</Text>
+          {tapSummary.incidents?.length ? (
+            <Pressable
+              style={styles.tapButton}
+              onPress={() => setSelectedIncident(tapSummary.incidents[0])}>
+              <Text style={styles.tapButtonText}>View Details</Text>
+            </Pressable>
+          ) : null}
         </Animated.View>
       ) : null}
 
+      {/* Filter drawer */}
       {filterVisible ? (
         <>
           <Pressable style={styles.drawerBackdrop} onPress={closeFilter} />
@@ -677,14 +626,9 @@ export default function CrimeMonitorScreen() {
             style={[
               styles.drawerWrap,
               {
-                transform: [
-                  {
-                    translateY: filterAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [340, 0]
-                    })
-                  }
-                ]
+                transform: [{
+                  translateY: filterAnim.interpolate({ inputRange: [0, 1], outputRange: [340, 0] })
+                }]
               }
             ]}>
             <CrimeFilterDrawer
@@ -699,19 +643,15 @@ export default function CrimeMonitorScreen() {
         </>
       ) : null}
 
+      {/* Stats overlay */}
       <Animated.View
         pointerEvents={showStats ? 'auto' : 'none'}
         style={[
           styles.statsWrap,
           {
-            transform: [
-              {
-                translateX: statsAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [SCREEN_WIDTH, 0]
-                })
-              }
-            ]
+            transform: [{
+              translateX: statsAnim.interpolate({ inputRange: [0, 1], outputRange: [SCREEN_WIDTH, 0] })
+            }]
           }
         ]}>
         <CrimeMonitorStatsScreen
@@ -744,24 +684,24 @@ export default function CrimeMonitorScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (isDarkMode) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#031324'
+    backgroundColor: isDarkMode ? '#031324' : '#f8fafc'
   },
   controlsToggle: {
     position: 'absolute',
     right: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#70bbf8',
-    backgroundColor: 'rgba(22, 73, 115, 0.94)',
+    borderColor: isDarkMode ? '#4a90c7' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(15, 55, 90, 0.94)' : 'rgba(255, 255, 255, 0.95)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 7,
     zIndex: 12
   },
   controlsToggleText: {
-    color: '#eff8ff',
+    color: isDarkMode ? '#eff8ff' : '#0f172a',
     fontWeight: '800',
     fontSize: 12
   },
@@ -769,12 +709,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 10,
     right: 10,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(95, 148, 198, 0.5)',
-    backgroundColor: 'rgba(7, 24, 42, 0.86)',
+    borderColor: isDarkMode ? 'rgba(80, 130, 180, 0.4)' : 'rgba(203, 213, 225, 0.8)',
+    backgroundColor: isDarkMode ? 'rgba(7, 22, 40, 0.92)' : 'rgba(255, 255, 255, 0.95)',
     padding: 10,
-    maxHeight: '60%'
+    maxHeight: '55%',
+    zIndex: 10
   },
   selectorRow: {
     flexDirection: 'row',
@@ -784,22 +725,22 @@ const styles = StyleSheet.create({
   selectorField: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#2e5d8c',
+    borderColor: isDarkMode ? '#2a4d70' : '#cbd5e1',
     borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: 'rgba(9, 39, 67, 0.8)'
+    backgroundColor: isDarkMode ? 'rgba(9, 35, 60, 0.85)' : 'rgba(248, 250, 252, 0.9)'
   },
   fieldLabel: {
-    color: '#9fc2e2',
-    fontSize: 10,
+    color: isDarkMode ? '#8fb8d8' : '#64748b',
+    fontSize: 9,
     fontWeight: '800',
     textTransform: 'uppercase',
-    marginTop: 6,
+    marginTop: 5,
     marginLeft: 8,
     letterSpacing: 0.5
   },
   picker: {
-    color: '#e7f2fd',
+    color: isDarkMode ? '#e7f2fd' : '#0f172a',
     marginTop: -8,
     marginBottom: -10,
     height: 44
@@ -807,161 +748,144 @@ const styles = StyleSheet.create({
   areaPickerButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#2e5d8c',
+    borderColor: isDarkMode ? '#2a4d70' : '#cbd5e1',
     borderRadius: 10,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 5,
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(9, 39, 67, 0.8)'
+    backgroundColor: isDarkMode ? 'rgba(9, 35, 60, 0.85)' : 'rgba(248, 250, 252, 0.9)'
   },
   areaPickerText: {
-    marginTop: 4,
-    color: '#eaf4ff',
-    fontWeight: '700'
+    marginTop: 3,
+    color: isDarkMode ? '#eaf4ff' : '#0f172a',
+    fontWeight: '700',
+    fontSize: 12
   },
   timeControls: {
-    marginTop: 9
+    marginTop: 8
   },
   yearPill: {
     alignSelf: 'flex-start',
     borderWidth: 1,
-    borderColor: '#4f84b5',
+    borderColor: isDarkMode ? '#4a7da8' : '#e2e8f0',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
-    backgroundColor: 'rgba(20, 63, 102, 0.7)'
+    backgroundColor: isDarkMode ? 'rgba(20, 58, 92, 0.7)' : 'rgba(241, 245, 249, 0.9)'
   },
   yearLabel: {
-    color: '#e8f3fd',
-    fontWeight: '800'
+    color: isDarkMode ? '#e8f3fd' : '#0f172a',
+    fontWeight: '800',
+    fontSize: 12
   },
   monthScroll: {
-    marginTop: 8,
+    marginTop: 7,
     paddingRight: 10,
-    gap: 6
+    gap: 5
   },
-  monthChip: {
+  chip: {
     borderWidth: 1,
-    borderColor: '#315d87',
+    borderColor: isDarkMode ? '#2d4f73' : '#cbd5e1',
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 5,
-    backgroundColor: 'rgba(9, 36, 61, 0.8)'
+    backgroundColor: isDarkMode ? 'rgba(9, 33, 56, 0.8)' : 'rgba(248, 250, 252, 0.9)'
   },
-  monthChipActive: {
-    borderColor: '#7bc3ff',
-    backgroundColor: '#266399'
+  chipActive: {
+    borderColor: isDarkMode ? '#5a9fd4' : '#94a3b8',
+    backgroundColor: isDarkMode ? '#1a4e7a' : '#e0e7ff'
   },
-  monthChipText: {
-    color: '#b4d1eb',
+  chipText: {
+    color: isDarkMode ? '#a8c8e2' : '#e2e8f0',
     fontWeight: '700',
-    fontSize: 12
+    fontSize: 11
   },
-  monthChipTextActive: {
-    color: '#f2f9ff'
+  chipTextActive: {
+    color: isDarkMode ? '#f0f8ff' : '#0f172a'
   },
   weekRow: {
-    marginTop: 8,
+    marginTop: 7,
     flexDirection: 'row',
-    gap: 6
+    gap: 5
   },
   weekChip: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#315d87',
+    borderColor: isDarkMode ? '#2d4f73' : '#cbd5e1',
     borderRadius: 8,
-    paddingVertical: 7,
+    paddingVertical: 6,
     alignItems: 'center',
-    backgroundColor: 'rgba(9, 36, 61, 0.8)'
+    backgroundColor: isDarkMode ? 'rgba(9, 33, 56, 0.8)' : 'rgba(248, 250, 252, 0.9)'
   },
   weekChipActive: {
-    borderColor: '#7bc3ff',
-    backgroundColor: '#266399'
-  },
-  weekChipText: {
-    color: '#b4d1eb',
-    fontWeight: '700',
-    fontSize: 12
-  },
-  weekChipTextActive: {
-    color: '#eff8ff'
-  },
-  mapTitleRow: {
-    marginTop: 10,
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  mapTitle: {
-    flex: 1,
-    color: '#f2f8ff',
-    fontWeight: '800',
-    fontSize: 12,
-    lineHeight: 16
+    borderColor: isDarkMode ? '#5a9fd4' : '#94a3b8',
+    backgroundColor: isDarkMode ? '#1a4e7a' : '#e0e7ff'
   },
   actionsRow: {
-    marginLeft: 8,
+    marginTop: 8,
     flexDirection: 'row',
     gap: 6
   },
-  headerButton: {
+  actionBtn: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#5e90be',
+    borderColor: isDarkMode ? '#4a7da8' : '#e2e8f0',
     borderRadius: 8,
-    paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: 'rgba(28, 72, 112, 0.7)'
+    alignItems: 'center',
+    backgroundColor: isDarkMode ? 'rgba(22, 62, 98, 0.7)' : 'rgba(241, 245, 249, 0.9)'
   },
-  headerButtonText: {
-    color: '#e8f3fe',
+  actionBtnText: {
+    color: isDarkMode ? '#e8f3fe' : '#0f172a',
     fontWeight: '800',
-    fontSize: 12
+    fontSize: 11
   },
   radiusRow: {
-    marginTop: 10,
+    marginTop: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 5,
     alignItems: 'center'
   },
   layerRow: {
-    marginTop: 10,
+    marginTop: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6
+    gap: 5,
+    paddingBottom: 4
   },
   layerToggle: {
     borderWidth: 1,
-    borderColor: '#365e86',
+    borderColor: isDarkMode ? '#2d4f73' : '#cbd5e1',
     borderRadius: 999,
     paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: 'rgba(8, 31, 52, 0.7)'
+    paddingVertical: 4,
+    backgroundColor: isDarkMode ? 'rgba(8, 28, 48, 0.7)' : 'rgba(241, 245, 249, 0.9)'
   },
   layerToggleActive: {
-    borderColor: '#70bbf8',
-    backgroundColor: 'rgba(41, 104, 159, 0.62)'
+    borderColor: isDarkMode ? '#5a9fd4' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(35, 90, 140, 0.6)' : 'rgba(226, 232, 240, 0.8)'
   },
   layerToggleText: {
-    color: '#d8e9fa',
+    color: isDarkMode ? '#d0e2f4' : '#0f172a',
     fontWeight: '700',
-    fontSize: 11
+    fontSize: 10
   },
-  scoreCardMini: {
+  scoreCard: {
     position: 'absolute',
     left: 12,
     right: 12,
-    top: 338,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#376690',
-    backgroundColor: 'rgba(7, 29, 51, 0.86)',
+    borderColor: isDarkMode ? '#2d5a84' : '#cbd5e1',
+    backgroundColor: isDarkMode ? 'rgba(7, 26, 46, 0.92)' : 'rgba(255, 255, 255, 0.95)',
     padding: 10,
     flexDirection: 'row',
     alignItems: 'center'
   },
   scoreBand: {
-    width: 7,
-    height: 40,
+    width: 5,
+    height: 36,
     borderRadius: 999,
     marginRight: 9
   },
@@ -969,182 +893,169 @@ const styles = StyleSheet.create({
     flex: 1
   },
   scoreTitle: {
-    color: '#edf7ff',
-    fontWeight: '800'
+    color: isDarkMode ? '#edf7ff' : '#0f172a',
+    fontWeight: '800',
+    fontSize: 14
+  },
+  scoreMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 2
   },
   scoreMeta: {
-    marginTop: 2,
-    color: '#accae6',
-    fontSize: 12
+    color: isDarkMode ? '#99bbd6' : '#64748b',
+    fontSize: 11
+  },
+  scoreChange: {
+    fontSize: 11,
+    fontWeight: '800'
   },
   infoButton: {
     borderWidth: 1,
-    borderColor: '#4f81af',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6
+    borderColor: isDarkMode ? '#3d6d9a' : '#94a3b8',
+    borderRadius: 999,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center'
   },
   infoText: {
-    color: '#d7eafc',
-    fontSize: 11,
+    color: isDarkMode ? '#d7eafc' : '#e2e8f0',
+    fontSize: 14,
     fontWeight: '700'
   },
   helpTooltip: {
     position: 'absolute',
     left: 12,
     right: 12,
-    top: 390,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#4d769d',
-    backgroundColor: 'rgba(9, 38, 66, 0.9)',
+    borderColor: isDarkMode ? '#3d6d9a' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(9, 35, 62, 0.94)' : 'rgba(255, 255, 255, 0.95)',
     padding: 9
   },
   helpText: {
-    color: '#c9ddf1',
-    fontSize: 12,
-    lineHeight: 17
+    color: isDarkMode ? '#c0d6ea' : '#0f172a',
+    fontSize: 11,
+    lineHeight: 16
   },
   legendCard: {
     position: 'absolute',
-    top: 440,
     left: 12,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#3f6b94',
-    backgroundColor: 'rgba(5, 25, 45, 0.85)',
-    padding: 9
+    borderColor: isDarkMode ? '#3d6d9a' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(5, 22, 40, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+    padding: 8
   },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 3
+    marginVertical: 2
   },
   legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 7
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6
   },
   legendText: {
-    color: '#ddeaf8',
-    fontSize: 12,
+    color: isDarkMode ? '#d0e2f4' : '#0f172a',
+    fontSize: 11,
     fontWeight: '700'
   },
   sourcePanel: {
     position: 'absolute',
     left: 12,
-    right: 12,
-    bottom: 84,
-    borderRadius: 10,
+    right: 80,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#305b83',
-    backgroundColor: 'rgba(6, 24, 42, 0.86)',
-    paddingHorizontal: 9,
-    paddingVertical: 8
+    borderColor: isDarkMode ? '#254563' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(6, 22, 38, 0.88)' : 'rgba(248, 250, 252, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 6
   },
   sourceText: {
-    color: '#9fbad5',
-    fontSize: 11,
-    lineHeight: 15
-  },
-  updatedText: {
-    marginTop: 3,
-    color: '#d7e6f5',
-    fontSize: 11,
-    fontWeight: '700'
+    color: isDarkMode ? '#7a9cb8' : '#64748b',
+    fontSize: 9,
+    lineHeight: 13
   },
   fabColumn: {
     position: 'absolute',
-    right: 14,
-    alignItems: 'flex-end',
-    gap: 8
-  },
-  fabSecondary: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#5e90be',
-    backgroundColor: 'rgba(20, 67, 107, 0.9)',
-    paddingHorizontal: 14,
-    paddingVertical: 9
-  },
-  fabSecondaryActive: {
-    borderColor: '#88c7fa',
-    backgroundColor: '#2a6aa5'
-  },
-  fabSecondaryText: {
-    color: '#eff8ff',
-    fontWeight: '800'
+    right: 12,
+    alignItems: 'flex-end'
   },
   fab: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#75bff9',
-    backgroundColor: '#255f98',
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    borderColor: isDarkMode ? '#5a9fd4' : '#94a3b8',
+    backgroundColor: isDarkMode ? '#1a4e7a' : '#e0e7ff',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 8
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6
   },
   fabText: {
-    color: '#eff8ff',
-    fontWeight: '800'
+    color: isDarkMode ? '#eff8ff' : '#0f172a',
+    fontWeight: '800',
+    fontSize: 12
   },
   focusPinOuter: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 2,
-    borderColor: '#1e3a8a',
-    backgroundColor: '#dbeafe',
+    borderColor: isDarkMode ? '#1e3a8a' : '#e2e8f0',
+    backgroundColor: isDarkMode ? '#dbeafe' : '#e2e8f0',
     justifyContent: 'center',
     alignItems: 'center'
   },
   focusPinInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#2563eb'
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: isDarkMode ? '#2563eb' : '#e2e8f0'
   },
   tapSummary: {
     position: 'absolute',
     right: 12,
-    bottom: 218,
-    width: 204,
+    width: 190,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#5a83aa',
-    backgroundColor: 'rgba(8, 33, 58, 0.92)',
+    borderColor: isDarkMode ? '#3d6d9a' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(8, 30, 52, 0.94)' : 'rgba(255, 255, 255, 0.95)',
     padding: 10
   },
   tapTitle: {
-    color: '#f0f8ff',
-    fontWeight: '800'
+    color: isDarkMode ? '#f0f8ff' : '#0f172a',
+    fontWeight: '800',
+    fontSize: 13
   },
   tapMeta: {
-    marginTop: 4,
-    color: '#c3d9ef',
-    fontSize: 12
+    marginTop: 3,
+    color: isDarkMode ? '#b0cfe2' : '#e2e8f0',
+    fontSize: 11
   },
   tapButton: {
-    marginTop: 9,
+    marginTop: 8,
     borderWidth: 1,
-    borderColor: '#74bcf6',
-    backgroundColor: 'rgba(34, 96, 152, 0.85)',
+    borderColor: isDarkMode ? '#5a9fd4' : '#94a3b8',
+    backgroundColor: isDarkMode ? 'rgba(28, 82, 130, 0.85)' : 'rgba(248, 250, 252, 0.9)',
     borderRadius: 8,
-    paddingVertical: 7,
+    paddingVertical: 6,
     alignItems: 'center'
   },
   tapButtonText: {
-    color: '#eff8ff',
-    fontWeight: '800'
+    color: isDarkMode ? '#eff8ff' : '#0f172a',
+    fontWeight: '800',
+    fontSize: 11
   },
   drawerBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(3, 11, 22, 0.62)'
+    backgroundColor: isDarkMode ? 'rgba(3, 11, 22, 0.6)' : 'rgba(226, 232, 240, 0.8)'
   },
   drawerWrap: {
     position: 'absolute',
@@ -1152,34 +1063,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0
   },
-  hiddenOverlay: {
-    display: 'none'
-  },
   statsWrap: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 30
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -219,40 +219,62 @@ const weightForIncident = (incident) => SEVERITY_WEIGHTS[incident.severityLevel]
 const scoreBand = (score) => SCORE_BANDS.find((item) => score >= item.min) || SCORE_BANDS[SCORE_BANDS.length - 1];
 
 const calculateSafetyScore = (incidents) => {
-  const weighted = incidents.reduce((sum, incident) => sum + weightForIncident(incident) * 2.6, 0);
-  const incidentPenalty = incidents.length * 0.9;
+  const weighted = incidents.reduce((sum, incident) => sum + weightForIncident(incident) * 0.8, 0);
+  const incidentPenalty = incidents.length * 0.4;
   const score = clamp(Math.round(100 - weighted - incidentPenalty), 0, 100);
   return score;
 };
 
 const categoryLabelMap = CRIME_CATEGORIES.reduce((acc, item) => ({ ...acc, [item.key]: item.label }), {});
 
+const CATEGORY_COLOR_MAP = {
+  violent: '#dc2626',
+  sexual: '#9333ea',
+  property: '#f97316',
+  women: '#ec4899',
+  cyber: '#2563eb'
+};
+
 const categoryBreakdown = (incidents) => {
   const result = {};
+  const severityTracking = {};
   CRIME_CATEGORIES.filter((item) => item.key !== 'all').forEach((item) => {
     result[item.key] = 0;
+    severityTracking[item.key] = { Critical: 0, High: 0, Medium: 0, Low: 0 };
   });
 
   incidents.forEach((incident) => {
     result[incident.category] = (result[incident.category] || 0) + 1;
+    if (severityTracking[incident.category]) {
+      severityTracking[incident.category][incident.severityLevel] =
+        (severityTracking[incident.category][incident.severityLevel] || 0) + 1;
+    }
   });
 
-  return Object.entries(result).map(([category, count]) => ({
-    category,
-    label: categoryLabelMap[category],
-    count
-  }));
+  return Object.entries(result).map(([category, count]) => {
+    const sv = severityTracking[category] || {};
+    const topSeverity = sv.Critical > 0 ? 'Critical' : sv.High > 0 ? 'High' : sv.Medium > 0 ? 'Medium' : 'Low';
+    return {
+      category: categoryLabelMap[category] || category,
+      count,
+      color: CATEGORY_COLOR_MAP[category] || SEVERITY_COLORS[topSeverity],
+      topSeverity
+    };
+  });
 };
 
 const monthRange = (incidents, monthIndex) => incidents.filter((item) => item.monthIndex === monthIndex);
 
-const weeklyScoresForMonth = (incidents, monthIndex) =>
+const weeklyTrendForMonth = (incidents, monthIndex) =>
   WEEK_OPTIONS.map((week) => {
     const weekIncidents = incidents.filter((item) => item.monthIndex === monthIndex && item.weekIndex === week);
+    const score = calculateSafetyScore(weekIncidents);
+    const band = scoreBand(score);
     return {
-      week,
-      incidents: weekIncidents.length,
-      score: calculateSafetyScore(weekIncidents)
+      week: `W${week}`,
+      count: weekIncidents.length,
+      score,
+      color: band.color
     };
   });
 
@@ -371,8 +393,8 @@ export const getCrimeSnapshot = ({
     scoreChangePct,
     dominantCrimeType: dominantCrime(filtered),
     totalIncidents: filtered.length,
-    categoryBars: categoryBreakdown(filtered),
-    weeklyTrend: weeklyScoresForMonth(
+    categoryBreakdown: categoryBreakdown(filtered),
+    weeklyTrend: weeklyTrendForMonth(
       allAreaIncidents.filter(
         (incident) =>
           activeCategories.includes(incident.category) && (severityGradedOnly ? weightForIncident(incident) >= 2 : true)
@@ -380,9 +402,9 @@ export const getCrimeSnapshot = ({
       monthIndex
     ),
     monthComparison: {
-      selectedMonthIncidents: selectedMonthIncidents.length,
-      previousMonthIncidents: previousMonthIncidents.length,
-      diffPct: monthDiff
+      current: selectedMonthIncidents.length,
+      previous: previousMonthIncidents.length,
+      change: monthDiff
     }
   };
 };

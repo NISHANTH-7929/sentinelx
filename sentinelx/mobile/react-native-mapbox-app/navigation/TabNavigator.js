@@ -3,8 +3,14 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MapScreen from '../screens/MapScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import CrimeMonitorScreen from '../screens/CrimeMonitorScreen';
+import ReportHubScreen from '../screens/ReportHubScreen';
 import { ThemeContext } from '../theme/ThemeContext';
-import { CrimeMonitorIcon, OperationsIcon, SettingsIcon } from '../components/icons/TabIcons';
+import {
+  CrimeMonitorIcon,
+  OperationsIcon,
+  ReportIcon,
+  SettingsIcon
+} from '../components/icons/TabIcons';
 
 const Tab = createBottomTabNavigator();
 
@@ -14,6 +20,10 @@ const OperationsTabIcon = ({ color, focused }) => (
 
 const CrimeMonitorTabIcon = ({ color, focused }) => (
   <CrimeMonitorIcon size={focused ? 24 : 22} color={color} />
+);
+
+const ReportTabIcon = ({ color, focused }) => (
+  <ReportIcon size={focused ? 24 : 22} color={color} />
 );
 
 const SettingsTabIcon = ({ color, focused }) => (
@@ -43,7 +53,7 @@ export default function TabNavigator() {
         tabBarInactiveTintColor: '#7f9bb8',
         tabBarLabelStyle: {
           fontWeight: '700',
-          fontSize: 12,
+          fontSize: 11,
           marginTop: 1
         },
         tabBarIconStyle: {
@@ -54,7 +64,7 @@ export default function TabNavigator() {
         name="Operations"
         component={MapScreen}
         options={{
-          tabBarLabel: 'Operations',
+          tabBarLabel: 'Live Map',
           tabBarIcon: OperationsTabIcon
         }}
       />
@@ -62,8 +72,16 @@ export default function TabNavigator() {
         name="CrimeMonitor"
         component={CrimeMonitorScreen}
         options={{
-          tabBarLabel: 'Crime Monitor',
+          tabBarLabel: 'Crime Intel',
           tabBarIcon: CrimeMonitorTabIcon
+        }}
+      />
+      <Tab.Screen
+        name="Report"
+        component={ReportHubScreen}
+        options={{
+          tabBarLabel: 'File Report',
+          tabBarIcon: ReportTabIcon
         }}
       />
       <Tab.Screen

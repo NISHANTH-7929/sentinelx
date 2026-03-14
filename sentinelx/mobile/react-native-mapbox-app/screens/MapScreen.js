@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState
 } from 'react';
+import { useRoute, useFocusEffect } from '@react-navigation/native';
 import {
   Animated,
   Easing,
@@ -17,12 +18,46 @@ import {
 } from 'react-native';
 import Mapbox from '@rnmapbox/maps';
 
+// Pulsing dot annotation rendered over new incidents on the map
+function PulsingRing({ color = '#ef4444' }) {
+  const scale = useRef(new Animated.Value(0.5)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.8, duration: 700, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0.5, duration: 700, useNativeDriver: true })
+        ]),
+        Animated.sequence([
+          Animated.timing(opacity, { toValue: 0.15, duration: 700, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 1,    duration: 700, useNativeDriver: true })
+        ])
+      ])
+    ).start();
+    return () => { scale.stopAnimation(); opacity.stopAnimation(); };
+  }, [opacity, scale]);
+  return (
+    <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+      <Animated.View style={{
+        width: 22, height: 22, borderRadius: 11,
+        borderWidth: 2.5, borderColor: color,
+        backgroundColor: `${color}33`,
+        transform: [{ scale }],
+        opacity
+      }} />
+    </View>
+  );
+}
+
 import IncidentDetailsModal from '../components/IncidentDetailsModal';
 import IncidentTapPopup from '../components/IncidentTapPopup';
 import LocationAccessModal from '../components/LocationAccessModal';
 import RegionSelectorPanel from '../components/RegionSelectorPanel';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../theme/ThemeContext';
 import { useUserLocation } from '../hooks/useUserLocation';
+import { useAIIncidentStore } from '../services/aiIncidentStore';
 import { enrichIncident, getSeverityWeight } from '../services/incidentClassifier';
 import {
   fetchIncidents,
@@ -31,12 +66,14 @@ import {
   stopSimulator
 } from '../services/incidentsApi';
 import { IncidentSocketClient } from '../services/incidentsSocket';
-import { MAPBOX_ACCESS_TOKEN } from '../services/config';
+import LiveIncidentFeedPanel from '../components/LiveIncidentFeedPanel';
+import { MAPBOX_ACCESS_TOKEN, API_BASE_URL } from '../services/config';
 import {
   DEFAULT_REGION,
   getAreaConfig,
   getAreas,
   getDistricts,
+  findAreaByCoordinate,
   REGION_TREE
 } from '../services/regions';
 import { distanceMeters } from '../services/geo';
@@ -44,25 +81,25 @@ import { distanceMeters } from '../services/geo';
 Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
 
 const GRID_SIZE_METERS = 500;
-const TAP_RADIUS_METERS = 250;
-const MAX_ZONE_FEATURES = 1200;
+const TAP_RADIUS_METERS = 500;
+const MAX_ZONE_FEATURES = 800;
 
 const PALETTE = {
   dark: {
     zoneOutline: '#2f455f',
-    zoneSafe: '#22c55e',
+    zoneSafe: '#16a34a',
     zoneModerate: '#eab308',
     zoneRisk: '#f97316',
-    zoneDanger: '#ef4444',
-    panelBg: 'rgba(8,24,41,0.82)',
-    panelBorder: 'rgba(102,156,209,0.3)',
+    zoneDanger: '#dc2626',
+    panelBg: 'rgba(8,24,41,0.88)',
+    panelBorder: 'rgba(100,160,220,0.25)',
     panelText: '#eaf4ff',
     panelMuted: '#91b5d8',
-    statusErrorBg: 'rgba(127,29,29,0.9)',
+    statusErrorBg: 'rgba(127,29,29,0.92)',
     statusErrorBorder: '#ef4444',
     statusErrorText: '#fee2e2',
     statusErrorSub: '#fca5a5',
-    simBadgeBg: '#1d4ed8'
+    simBadgeBg: '#1e3a8a'
   },
   light: {
     zoneOutline: '#7f97b2',
@@ -70,11 +107,11 @@ const PALETTE = {
     zoneModerate: '#ca8a04',
     zoneRisk: '#ea580c',
     zoneDanger: '#dc2626',
-    panelBg: 'rgba(242,247,252,0.82)',
-    panelBorder: 'rgba(64,111,161,0.34)',
+    panelBg: 'rgba(242,247,252,0.88)',
+    panelBorder: 'rgba(64,111,161,0.3)',
     panelText: '#12365d',
     panelMuted: '#365f8a',
-    statusErrorBg: 'rgba(185,28,28,0.9)',
+    statusErrorBg: 'rgba(185,28,28,0.92)',
     statusErrorBorder: '#f87171',
     statusErrorText: '#fff1f2',
     statusErrorSub: '#ffe4e6',
@@ -134,9 +171,7 @@ const buildZoneGrid = (bbox, incidents, colors) => {
 
   for (let lat = minLat; lat < maxLat; lat += latStep) {
     for (let lng = minLng; lng < maxLng; lng += lngStep) {
-      if (tileCount >= MAX_ZONE_FEATURES) {
-        break;
-      }
+      if (tileCount >= MAX_ZONE_FEATURES) break;
 
       const zoneIncidents = incidents.filter(
         (incident) =>
@@ -178,25 +213,16 @@ const buildZoneGrid = (bbox, incidents, colors) => {
             [lng, lat]
           ]]
         },
-        properties: {
-          score,
-          label,
-          color
-        }
+        properties: { score, label, color }
       });
 
       tileCount += 1;
     }
 
-    if (tileCount >= MAX_ZONE_FEATURES) {
-      break;
-    }
+    if (tileCount >= MAX_ZONE_FEATURES) break;
   }
 
-  return {
-    type: 'FeatureCollection',
-    features: zones
-  };
+  return { type: 'FeatureCollection', features: zones };
 };
 
 const getSocketDotColor = (status) => {
@@ -234,35 +260,67 @@ const buildOfflineIncidents = (centerCoordinate, total = 18) => {
   });
 };
 
+const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
+
 export default function MapScreen() {
+  const insets = useSafeAreaInsets();
+  const route = useRoute();
+
   const { isDarkMode } = useContext(ThemeContext);
-  const colors = isDarkMode ? PALETTE.dark : PALETTE.light;
+
+  const colors = useMemo(
+    () => (isDarkMode ? PALETTE.dark : PALETTE.light),
+    [isDarkMode]
+  );
 
   const cameraRef = useRef(null);
   const socketRef = useRef(null);
   const mountedRef = useRef(true);
+  const zoneTaskRef = useRef(null);
 
   const [selectedState, setSelectedState] = useState(DEFAULT_REGION.state);
   const [selectedDistrict, setSelectedDistrict] = useState(DEFAULT_REGION.district);
   const [selectedArea, setSelectedArea] = useState(DEFAULT_REGION.area);
 
   const [incidents, setIncidents] = useState([]);
+  const [allStreamIncidents, setAllStreamIncidents] = useState([]); // All WS events, no bbox
+  const [recentIds, setRecentIds] = useState(new Set()); // IDs of newly arrived incidents (for blinking)
   const [simulationMode, setSimulationMode] = useState(true);
   const [socketStatus, setSocketStatus] = useState('connecting');
 
   const [tapCoordinate, setTapCoordinate] = useState(null);
   const [nearbyIncidents, setNearbyIncidents] = useState([]);
-  const [radiusOverlay, setRadiusOverlay] = useState({ type: 'FeatureCollection', features: [] });
+  const [radiusOverlay, setRadiusOverlay] = useState(EMPTY_GEOJSON);
   const [highlightedIncidentIds, setHighlightedIncidentIds] = useState([]);
   const [selectedIncident, setSelectedIncident] = useState(null);
 
-  const [pulseRadius, setPulseRadius] = useState(16);
+  const [zonesSource, setZonesSource] = useState(EMPTY_GEOJSON);
   const [isControlsExpanded, setIsControlsExpanded] = useState(false);
+  const [showSafetyScore, setShowSafetyScore] = useState(false);
+  
+  // Flag to know if area change was from a tap
+  const isTapNavigation = useRef(false);
 
   const panelAnim = useRef(new Animated.Value(0)).current;
   const popupAnim = useRef(new Animated.Value(0)).current;
-  const simBadgeAnim = useRef(new Animated.Value(1)).current;
-  const pulseAnim = useRef(new Animated.Value(0)).current;
+
+  // Handle focus-incident deep link from proximity alert banner tap
+  useFocusEffect(
+    useCallback(() => {
+      const focusIncident = route.params?.focusIncident;
+      if (!focusIncident) return;
+
+      // Fly camera to the incident location
+      cameraRef.current?.setCamera({
+        centerCoordinate: [focusIncident.longitude, focusIncident.latitude],
+        zoomLevel: 15,
+        animationDuration: 900
+      });
+
+      // Open the incident details modal
+      setSelectedIncident(focusIncident);
+    }, [route.params?.focusIncident])
+  );
 
   const {
     coordinate,
@@ -293,54 +351,48 @@ export default function MapScreen() {
     };
   }, []);
 
+  // Panel entrance animation
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(panelAnim, {
-        toValue: 1,
-        duration: 700,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true
-      }),
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(simBadgeAnim, { toValue: 1.05, duration: 900, useNativeDriver: true }),
-          Animated.timing(simBadgeAnim, { toValue: 1, duration: 900, useNativeDriver: true })
-        ])
-      )
-    ]).start();
-
-    const listenerId = pulseAnim.addListener(({ value }) => {
-      if (mountedRef.current) {
-        setPulseRadius(14 + value * 14);
-      }
-    });
-
-    Animated.loop(
-      Animated.timing(pulseAnim, {
-        toValue: 1,
-        duration: 1100,
-        easing: Easing.inOut(Easing.sin),
-        useNativeDriver: false
-      })
-    ).start();
+    Animated.timing(panelAnim, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true
+    }).start();
 
     return () => {
       panelAnim.stopAnimation();
-      simBadgeAnim.stopAnimation();
-      pulseAnim.removeListener(listenerId);
-      pulseAnim.stopAnimation();
     };
-  }, [panelAnim, popupAnim, pulseAnim, simBadgeAnim]);
+  }, [panelAnim]);
 
-
+  // Popup animation (opacity only — no scale to avoid layout jump)
   useEffect(() => {
-    Animated.spring(popupAnim, {
+    Animated.timing(popupAnim, {
       toValue: nearbyIncidents.length > 0 || tapCoordinate ? 1 : 0,
-      friction: 8,
-      tension: 70,
+      duration: 250,
+      easing: Easing.out(Easing.quad),
       useNativeDriver: true
     }).start();
   }, [nearbyIncidents.length, popupAnim, tapCoordinate]);
+
+  // Debounced zone grid computation — longer debounce prevents freezing on rapid events
+  useEffect(() => {
+    if (zoneTaskRef.current) {
+      clearTimeout(zoneTaskRef.current);
+    }
+
+    zoneTaskRef.current = setTimeout(() => {
+      if (mountedRef.current) {
+        setZonesSource(buildZoneGrid(areaConfig.bbox, incidents, colors));
+      }
+    }, 600);
+
+    return () => {
+      if (zoneTaskRef.current) {
+        clearTimeout(zoneTaskRef.current);
+      }
+    };
+  }, [areaConfig.bbox, colors, incidents]);
 
   const loadIncidentsForArea = useCallback(async () => {
     const sourceOpts = simulationMode
@@ -353,16 +405,18 @@ export default function MapScreen() {
         ...sourceOpts
       });
 
-      if (!mountedRef.current) {
-        return;
-      }
+      if (!mountedRef.current) return;
 
-      setIncidents(records.map(enrichIncident));
+      // If API returns zero results (server up but bbox has no data), use offline fallback
+      // so the selected area always shows incidents for a useful UI experience
+      if (records.length === 0) {
+        const fallback = buildOfflineIncidents(areaConfig.center).map(enrichIncident);
+        setIncidents(fallback);
+      } else {
+        setIncidents(records.map(enrichIncident));
+      }
     } catch (_error) {
-      if (!mountedRef.current) {
-        return;
-      }
-
+      if (!mountedRef.current) return;
       const fallback = buildOfflineIncidents(areaConfig.center).map(enrichIncident);
       setSocketStatus('offline');
       setIncidents(fallback);
@@ -380,18 +434,30 @@ export default function MapScreen() {
         }
       },
       onIncident: (incoming) => {
-        if (!mountedRef.current) {
-          return;
-        }
-
+        if (!mountedRef.current) return;
         const enriched = enrichIncident(incoming);
-        if (!inBbox(enriched, areaConfig.bbox)) {
-          return;
-        }
 
+        // ── All-stream feed (no bbox) — feeds the Live Feed Panel ──────────
+        setAllStreamIncidents((prev) => {
+          const deduped = [enriched, ...prev.filter((i) => i.id !== enriched.id)];
+          return deduped.slice(0, 60);
+        });
+
+        // ── Track recent IDs for pulsing PointAnnotations (12 s window) ────
+        setRecentIds((prev) => new Set([...prev, enriched.id]));
+        setTimeout(() => {
+          setRecentIds((prev) => {
+            const next = new Set(prev);
+            next.delete(enriched.id);
+            return next;
+          });
+        }, 12000);
+
+        // ── Map display — only show incident if it's inside current area ───
+        if (!inBbox(enriched, areaConfig.bbox)) return;
         setIncidents((previous) => {
           const deduped = [enriched, ...previous.filter((item) => item.id !== enriched.id)];
-          return deduped;
+          return deduped.slice(0, 200);
         });
       }
     });
@@ -407,55 +473,107 @@ export default function MapScreen() {
 
   useEffect(() => {
     loadIncidentsForArea();
-
-    cameraRef.current?.setCamera({
-      centerCoordinate: areaConfig.center,
-      zoomLevel: 12,
-      animationDuration: 950
-    });
+    
+    if (isTapNavigation.current) {
+      isTapNavigation.current = false;
+    } else {
+      cameraRef.current?.setCamera({
+        centerCoordinate: areaConfig.center,
+        zoomLevel: 12,
+        animationDuration: 950
+      });
+    }
   }, [areaConfig, loadIncidentsForArea]);
+
+  const allAiIncidents = useAIIncidentStore();
+  const aiVerifiedIncidents = useMemo(
+    () => allAiIncidents.filter((i) => i.status === 'VERIFIED'),
+    [allAiIncidents]
+  );
 
   const incidentSource = useMemo(() => {
     const highlightedSet = new Set(highlightedIncidentIds);
+    const base = incidents.map((incident) => ({
+      type: 'Feature',
+      id: incident.id,
+      geometry: {
+        type: 'Point',
+        coordinates: [incident.longitude, incident.latitude]
+      },
+      properties: {
+        incidentId: incident.id,
+        category: incident.category,
+        color: incident.severityColor,
+        highlighted: highlightedSet.has(incident.id),
+        weight: getSeverityWeight(incident.severityLevel),
+        aiVerified: false
+      }
+    }));
+
+    const aiFeatures = aiVerifiedIncidents.map((incident) => ({
+      type: 'Feature',
+      id: incident.id,
+      geometry: {
+        type: 'Point',
+        coordinates: [incident.location.lng, incident.location.lat]
+      },
+      properties: {
+        incidentId: incident.id,
+        category: incident.type,
+        color: '#16a34a',
+        highlighted: highlightedSet.has(incident.id),
+        weight: 0.8,
+        aiVerified: true,
+        aiConfidence: incident.aiResult?.confidence || 0,
+        aiExplanation: incident.aiResult?.explanation || ''
+      }
+    }));
 
     return {
       type: 'FeatureCollection',
-      features: incidents.map((incident) => ({
-        type: 'Feature',
-        id: incident.id,
-        geometry: {
-          type: 'Point',
-          coordinates: [incident.longitude, incident.latitude]
-        },
-        properties: {
-          incidentId: incident.id,
-          category: incident.category,
-          color: incident.severityColor,
-          highlighted: highlightedSet.has(incident.id),
-          weight: getSeverityWeight(incident.severityLevel)
-        }
-      }))
+      features: [...base, ...aiFeatures]
     };
-  }, [highlightedIncidentIds, incidents]);
+  }, [highlightedIncidentIds, incidents, aiVerifiedIncidents]);
 
-  const zonesSource = useMemo(
-    () => buildZoneGrid(areaConfig.bbox, incidents, colors),
-    [areaConfig.bbox, colors, incidents]
-  );
+  const dismissTap = useCallback(() => {
+    setTapCoordinate(null);
+    setNearbyIncidents([]);
+    setRadiusOverlay(EMPTY_GEOJSON);
+    setHighlightedIncidentIds([]);
+  }, []);
 
   const onMapTap = useCallback(
     async (event) => {
-      if (event?.features?.length) {
-        return;
-      }
+      if (event?.features?.length) return;
 
       const coords = event?.geometry?.coordinates;
-      if (!coords) {
+      if (!coords) return;
+
+      // If tapping again, dismiss the popup
+      if (tapCoordinate) {
+        dismissTap();
         return;
       }
 
       setTapCoordinate(coords);
       setRadiusOverlay(createCirclePolygon(coords, TAP_RADIUS_METERS));
+
+      // Auto-update the region selector UI
+      const foundRegion = findAreaByCoordinate(coords[0], coords[1]);
+      if (foundRegion) {
+        // Avoid fighting between tap flyTo and useEffect areaConfig flyTo
+        isTapNavigation.current = true;
+        setSelectedState(foundRegion.state);
+        setSelectedDistrict(foundRegion.district);
+        setSelectedArea(foundRegion.area);
+      }
+
+      // Auto-center camera on the tapped location
+      cameraRef.current?.setCamera({
+        centerCoordinate: coords,
+        animationDuration: 600,
+        zoomLevel: 13.5
+      });
 
       try {
         const nearby = await fetchIncidentsWithinRadius({
@@ -464,9 +582,7 @@ export default function MapScreen() {
           sourceFilter: simulationMode ? 'simulator' : 'live'
         });
 
-        if (!mountedRef.current) {
-          return;
-        }
+        if (!mountedRef.current) return;
 
         const enrichedNearby = nearby
           .map(enrichIncident)
@@ -481,16 +597,13 @@ export default function MapScreen() {
         }
       }
     },
-    [simulationMode]
+    [dismissTap, simulationMode, tapCoordinate]
   );
 
   const onMapLongPress = useCallback(
     (event) => {
       const coords = event?.geometry?.coordinates;
-      if (!coords) {
-        return;
-      }
-
+      if (!coords) return;
       setManualCoordinate(coords);
       cameraRef.current?.setCamera({
         centerCoordinate: coords,
@@ -504,10 +617,7 @@ export default function MapScreen() {
   const onIncidentPress = useCallback(
     (event) => {
       const feature = event?.features?.[0];
-      if (!feature) {
-        return;
-      }
-
+      if (!feature) return;
       const incidentId = feature.properties?.incidentId || feature.id;
       const incident = incidents.find((item) => item.id === incidentId);
       if (incident) {
@@ -519,14 +629,12 @@ export default function MapScreen() {
 
   const toggleSimulation = async (enabled) => {
     setSimulationMode(enabled);
-
     try {
       if (enabled) {
         await startSimulator();
       } else {
         await stopSimulator();
       }
-
       socketRef.current?.setMode(enabled ? 'simulator' : 'live');
       await loadIncidentsForArea();
     } catch (_error) {
@@ -555,68 +663,72 @@ export default function MapScreen() {
 
         {coordinate ? (
           <Mapbox.PointAnnotation id="user-location" coordinate={coordinate}>
-            <View style={styles.userDot} />
+            <View style={styles.userDotOuter}>
+              <View style={styles.userDotInner} />
+            </View>
           </Mapbox.PointAnnotation>
         ) : null}
 
-        <Mapbox.ShapeSource id="zones-source" shape={zonesSource}>
-          <Mapbox.FillLayer
-            id="zones-fill"
-            style={{
-              fillColor: ['get', 'color'],
-              fillOpacity: isDarkMode ? 0.24 : 0.18
-            }}
-          />
-          <Mapbox.LineLayer
-            id="zones-outline"
-            style={{
-              lineColor: colors.zoneOutline,
-              lineWidth: 0.8,
-              lineOpacity: 0.45
-            }}
-          />
-        </Mapbox.ShapeSource>
+        {/* Zones (Safety Score Grid) */}
+        {showSafetyScore && (
+          <Mapbox.ShapeSource id="zones-source" shape={zonesSource}>
+            <Mapbox.FillLayer
+              id="zones-fill"
+              style={{
+                fillColor: ['get', 'color'],
+                fillOpacity: isDarkMode ? 0.2 : 0.15
+              }}
+            />
+            <Mapbox.LineLayer
+              id="zones-outline"
+              style={{
+                lineColor: colors.zoneOutline,
+                lineWidth: 0.7,
+                lineOpacity: 0.4
+              }}
+            />
+          </Mapbox.ShapeSource>
+        )}
 
-        <Mapbox.ShapeSource id="incidents-source" shape={incidentSource} onPress={onIncidentPress}>
-          <Mapbox.HeatmapLayer
-            id="incident-heatmap"
-            style={{
-              heatmapWeight: ['get', 'weight'],
-              heatmapIntensity: ['interpolate', ['linear'], ['zoom'], 8, 1, 14, 3],
-              heatmapColor: [
-                'interpolate',
-                ['linear'],
-                ['heatmap-density'],
-                0,
-                'rgba(34,211,238,0)',
-                0.35,
-                '#22d3ee',
-                0.65,
-                '#fb923c',
-                1,
-                '#ef4444'
-              ],
-              heatmapRadius: ['interpolate', ['linear'], ['zoom'], 8, 8, 14, 34],
-              heatmapOpacity: isDarkMode ? 0.9 : 0.75
-            }}
-          />
+        <Mapbox.ShapeSource
+          id="incidents-source"
+          shape={incidentSource}
+          onPress={onIncidentPress}
+          cluster
+          clusterRadius={40}
+          clusterMaxZoomLevel={14}>
 
-          <Mapbox.CircleLayer
-            id="violent-pulse"
-            filter={['==', ['get', 'category'], 'violent']}
-            style={{
-              circleColor: '#ef4444',
-              circleOpacity: 0.2,
-              circleRadius: pulseRadius
-            }}
-          />
+          {showSafetyScore && (
+            <Mapbox.HeatmapLayer
+              id="incident-heatmap"
+              style={{
+                heatmapWeight: ['get', 'weight'],
+                heatmapIntensity: ['interpolate', ['linear'], ['zoom'], 8, 1, 14, 3],
+                heatmapColor: [
+                  'interpolate',
+                  ['linear'],
+                  ['heatmap-density'],
+                  0,
+                  'rgba(34,211,238,0)',
+                  0.35,
+                  '#22d3ee',
+                  0.65,
+                  '#fb923c',
+                  1,
+                  '#ef4444'
+                ],
+                heatmapRadius: ['interpolate', ['linear'], ['zoom'], 8, 8, 14, 30],
+                heatmapOpacity: isDarkMode ? 0.8 : 0.65
+              }}
+            />
+          )}
 
           <Mapbox.CircleLayer
             id="violent-core"
             filter={['==', ['get', 'category'], 'violent']}
             style={{
               circleColor: ['get', 'color'],
-              circleRadius: 6,
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 7],
               circleStrokeColor: '#fee2e2',
               circleStrokeWidth: 1
             }}
@@ -624,23 +736,23 @@ export default function MapScreen() {
 
           <Mapbox.CircleLayer
             id="sexual-layer"
-            filter={["==", ["get", "category"], "sexual"]}
+            filter={['==', ['get', 'category'], 'sexual']}
             style={{
-              circleColor: "#9333ea",
-              circleRadius: 6,
-              circleStrokeColor: "#f5d0fe",
-              circleStrokeWidth: 1.5
+              circleColor: '#9333ea',
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 6],
+              circleStrokeColor: '#f5d0fe',
+              circleStrokeWidth: 1
             }}
           />
 
           <Mapbox.CircleLayer
             id="property-layer"
-            filter={["==", ["get", "category"], "property"]}
+            filter={['==', ['get', 'category'], 'property']}
             style={{
-              circleColor: "#f97316",
-              circleRadius: 5,
-              circleStrokeColor: "#ffedd5",
-              circleStrokeWidth: 1.2
+              circleColor: '#f97316',
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 5],
+              circleStrokeColor: '#ffedd5',
+              circleStrokeWidth: 1
             }}
           />
 
@@ -649,20 +761,20 @@ export default function MapScreen() {
             filter={['==', ['get', 'category'], 'women']}
             style={{
               circleColor: '#ec4899',
-              circleRadius: 7,
-              circleBlur: 0.5,
-              circleOpacity: 0.9
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 6],
+              circleStrokeColor: '#fce7f3',
+              circleStrokeWidth: 1
             }}
           />
 
           <Mapbox.CircleLayer
             id="cyber-layer"
-            filter={["==", ["get", "category"], "cyber"]}
+            filter={['==', ['get', 'category'], 'cyber']}
             style={{
-              circleColor: "#2563eb",
-              circleRadius: 6,
-              circleStrokeColor: "#bfdbfe",
-              circleStrokeWidth: 1.4
+              circleColor: '#2563eb',
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 6],
+              circleStrokeColor: '#bfdbfe',
+              circleStrokeWidth: 1
             }}
           />
 
@@ -671,9 +783,22 @@ export default function MapScreen() {
             filter={['==', ['get', 'highlighted'], true]}
             style={{
               circleColor: 'rgba(255,255,255,0)',
-              circleRadius: 13,
+              circleRadius: 14,
               circleStrokeColor: '#93c5fd',
-              circleStrokeWidth: 2
+              circleStrokeWidth: 2.5
+            }}
+          />
+
+          {/* AI Verified incidents — green ring, larger marker */}
+          <Mapbox.CircleLayer
+            id="ai-verified-layer"
+            filter={['==', ['get', 'aiVerified'], true]}
+            style={{
+              circleColor: '#16a34a',
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 5, 14, 10],
+              circleStrokeColor: '#ffffff',
+              circleStrokeWidth: 2.5,
+              circleOpacity: 0.95
             }}
           />
         </Mapbox.ShapeSource>
@@ -683,7 +808,7 @@ export default function MapScreen() {
             id="tap-radius-fill"
             style={{
               fillColor: '#60a5fa',
-              fillOpacity: isDarkMode ? 0.16 : 0.11
+              fillOpacity: isDarkMode ? 0.14 : 0.1
             }}
           />
           <Mapbox.LineLayer
@@ -691,12 +816,34 @@ export default function MapScreen() {
             style={{
               lineColor: '#60a5fa',
               lineWidth: 2,
-              lineOpacity: 0.9
+              lineOpacity: 0.85,
+              lineDasharray: [3, 2]
             }}
           />
         </Mapbox.ShapeSource>
+
+        {/* Pulsing rings for newly arrived incidents (visible for 12 s) */}
+        {allStreamIncidents
+          .filter((inc) => recentIds.has(inc.id) && inc.longitude && inc.latitude)
+          .slice(0, 8)
+          .map((inc) => {
+            const ringColor =
+              (inc.severityLevel ?? inc.severity) >= 3 ? '#ef4444' :
+              (inc.severityLevel ?? inc.severity) >= 2 ? '#f97316' :
+              '#eab308';
+            return (
+              <Mapbox.PointAnnotation
+                key={`pulse-${inc.id}`}
+                id={`pulse-${inc.id}`}
+                coordinate={[inc.longitude, inc.latitude]}>
+                <PulsingRing color={ringColor} />
+              </Mapbox.PointAnnotation>
+            );
+          })
+        }
       </Mapbox.MapView>
 
+      {/* Region selector at the top */}
       <Animated.View
         style={[
           styles.panelAnimated,
@@ -722,47 +869,82 @@ export default function MapScreen() {
             setSelectedDistrict(nextDistrict);
             const nextArea = getAreas(nextState, nextDistrict)[0] || DEFAULT_REGION.area;
             setSelectedArea(nextArea);
+            dismissTap();
           }}
           onDistrictChange={(nextDistrict) => {
             setSelectedDistrict(nextDistrict);
             const nextArea = getAreas(selectedState, nextDistrict)[0] || DEFAULT_REGION.area;
             setSelectedArea(nextArea);
+            dismissTap();
           }}
-          onAreaChange={(nextArea) => setSelectedArea(nextArea)}
+          onAreaChange={(nextArea) => {
+            setSelectedArea(nextArea);
+            dismissTap();
+          }}
+          containerStyle={{ marginTop: insets.top + 8 }}
         />
       </Animated.View>
 
-      <Animated.View
-        style={[
-          styles.rightPanel,
-          {
-            opacity: panelAnim,
-            transform: [
-              {
-                translateX: panelAnim.interpolate({ inputRange: [0, 1], outputRange: [26, 0] })
-              }
-            ]
-          }
-        ]}>
+      {/* Controls panel – right side */}
+      <View style={styles.rightPanel}>
         <Pressable
-          style={[styles.glassCard, { backgroundColor: colors.panelBg, borderColor: colors.panelBorder, paddingVertical: 8, alignItems: 'center' }]}
-          onPress={() => setIsControlsExpanded(!isControlsExpanded)}
-        >
-          <Text style={[styles.cardTitle, { color: colors.panelText }]}>Controls {isControlsExpanded ? '▲' : '▼'}</Text>
+          style={[styles.glassCard, { backgroundColor: colors.panelBg, borderColor: colors.panelBorder }]}
+          onPress={() => setIsControlsExpanded(!isControlsExpanded)}>
+          <Text style={[styles.cardTitle, { color: colors.panelText }]}>
+            {isControlsExpanded ? '▲ Controls' : '▼ Controls'}
+          </Text>
         </Pressable>
 
-        {isControlsExpanded && (
+        {isControlsExpanded ? (
           <>
             <View style={[styles.glassCard, { backgroundColor: colors.panelBg, borderColor: colors.panelBorder }]}>
-              <Text style={[styles.cardTitle, { color: colors.panelMuted }]}>Demo Mode</Text>
+              <Text style={[styles.cardTitle, { color: colors.panelMuted }]}>Mode</Text>
               <View style={styles.rowBetween}>
                 <Text style={[styles.cardValue, { color: colors.panelText }]}>{simulationMode ? 'Simulation' : 'Live'}</Text>
                 <Switch value={simulationMode} onValueChange={toggleSimulation} />
+              </View>
+              <View style={[styles.rowBetween, { marginTop: 10 }]}>
+                <Text style={[styles.cardValue, { color: colors.panelText }]}>Safety Score Overlay</Text>
+                <Switch value={showSafetyScore} onValueChange={setShowSafetyScore} />
               </View>
               <View style={styles.socketRow}>
                 <View style={[styles.socketDot, { backgroundColor: getSocketDotColor(socketStatus) }]} />
                 <Text style={[styles.statusValue, { color: colors.panelMuted }]}>Socket: {socketStatus}</Text>
               </View>
+              {/* Test nearby alerts button for demos */}
+              {coordinate && (
+                <Pressable
+                  style={[styles.smallAction, { marginTop: 10, backgroundColor: 'rgba(239,68,68,0.18)', borderColor: '#ef4444' }]}
+                  onPress={async () => {
+                    const [lng, lat] = coordinate;
+                    const testTypes = [
+                      { type: 'fire',     description: 'Large building fire nearby',      severity: 3, confidence: 0.97, lat: lat + 0.001, lng: lng + 0.001 },
+                      { type: 'robbery',  description: 'Armed robbery in progress',       severity: 3, confidence: 0.95, lat: lat - 0.001, lng: lng + 0.002 },
+                      { type: 'assault',  description: 'Physical altercation reported',   severity: 2, confidence: 0.90, lat: lat + 0.0008, lng: lng - 0.001 },
+                      { type: 'accident', description: 'Vehicle collision on road nearby', severity: 2, confidence: 0.88, lat: lat - 0.0005, lng: lng - 0.002 },
+                      { type: 'theft',    description: 'Bag snatching near you',          severity: 1, confidence: 0.85, lat: lat + 0.0015, lng: lng + 0.0005 }
+                    ];
+                    for (const t of testTypes) {
+                      try {
+                        await fetch(`${API_BASE_URL}/api/incidents`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            type: t.type,
+                            description: t.description,
+                            latitude: t.lat,
+                            longitude: t.lng,
+                            confidence: t.confidence,
+                            source: 'simulator'
+                          })
+                        });
+                        await new Promise(r => setTimeout(r, 400));
+                      } catch (_) {}
+                    }
+                  }}>
+                  <Text style={[styles.smallActionText, { color: '#ef4444' }]}>🚨 Inject Nearby Alerts</Text>
+                </Pressable>
+              )}
             </View>
 
             <View style={[styles.glassCard, { backgroundColor: colors.panelBg, borderColor: colors.panelBorder }]}>
@@ -772,27 +954,26 @@ export default function MapScreen() {
                 <Text style={styles.smallActionText}>Retry GPS</Text>
               </Pressable>
               <Pressable style={styles.smallAction} onPress={useManualLocation}>
-                <Text style={styles.smallActionText}>Use Manual Location</Text>
+                <Text style={styles.smallActionText}>Use Manual</Text>
               </Pressable>
             </View>
           </>
-        )}
-      </Animated.View>
+        ) : null}
+      </View>
 
+      {/* Simulation mode badge */}
       {simulationMode ? (
-        <Animated.View style={[styles.simBadge, { backgroundColor: colors.simBadgeBg, transform: [{ scale: simBadgeAnim }] }]}>
-          <Text style={styles.simBadgeText}>SIMULATION MODE</Text>
-        </Animated.View>
+        <View style={[styles.simBadge, { backgroundColor: colors.simBadgeBg, top: insets.top + 60 }]}>
+          <Text style={styles.simBadgeText}>SIMULATION</Text>
+        </View>
       ) : null}
 
+      {/* Live feed unavailable banner */}
       {!simulationMode && socketStatus !== 'connected' ? (
         <View
           style={[
             styles.feedBanner,
-            {
-              backgroundColor: colors.statusErrorBg,
-              borderColor: colors.statusErrorBorder
-            }
+            { backgroundColor: colors.statusErrorBg, borderColor: colors.statusErrorBorder }
           ]}>
           <Text style={[styles.feedBannerText, { color: colors.statusErrorText }]}>Live feed unavailable</Text>
           <Text style={[styles.feedBannerSub, { color: colors.statusErrorSub }]}>
@@ -803,25 +984,54 @@ export default function MapScreen() {
         </View>
       ) : null}
 
+      {/* Manual location hint */}
       {manualMode ? (
         <View style={styles.manualHint}>
-          <Text style={styles.manualHintText}>Manual location mode: long press map to set your location</Text>
+          <Text style={styles.manualHintText}>Manual mode active — long press map to set location</Text>
         </View>
       ) : null}
 
-      {locationError ? (
+      {/* Location error */}
+      {locationError && !manualMode ? (
         <View style={styles.locationErrorBox}>
           <Text style={styles.locationErrorText}>{locationError}</Text>
+          <View style={styles.errorActions}>
+            <Pressable style={styles.errorActionBtn} onPress={resolveLocation}>
+              <Text style={styles.errorActionText}>Retry GPS</Text>
+            </Pressable>
+            <Pressable style={styles.errorActionBtn} onPress={useManualLocation}>
+              <Text style={styles.errorActionText}>Use Manual</Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
-      <Animated.View
-        style={{
-          transform: [{ scale: popupAnim }],
-          opacity: popupAnim
-        }}>
-        <IncidentTapPopup coordinate={tapCoordinate} incidents={nearbyIncidents} radiusMeters={TAP_RADIUS_METERS} />
+      <Animated.View style={{ opacity: popupAnim }} pointerEvents={tapCoordinate ? 'auto' : 'none'}>
+        <IncidentTapPopup
+          coordinate={tapCoordinate}
+          incidents={nearbyIncidents}
+          radiusMeters={TAP_RADIUS_METERS}
+          onDismiss={dismissTap}
+        />
       </Animated.View>
+
+      <LiveIncidentFeedPanel
+        incidents={allStreamIncidents}
+        isDarkMode={isDarkMode}
+        insets={insets}
+        onSelectIncident={(incident) => {
+          if (incident.longitude && incident.latitude) {
+            cameraRef.current?.setCamera({
+              centerCoordinate: [incident.longitude, incident.latitude],
+              zoomLevel: 14.5,
+              animationDuration: 850
+            });
+            setTimeout(() => setSelectedIncident(incident), 300);
+          } else {
+            setSelectedIncident(incident);
+          }
+        }}
+      />
 
       <IncidentDetailsModal
         visible={Boolean(selectedIncident)}
@@ -846,10 +1056,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#020617'
   },
-  userDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  userDotOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(56,189,248,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  userDotInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: '#38bdf8',
     borderWidth: 2,
     borderColor: '#f8fafc'
@@ -862,19 +1080,20 @@ const styles = StyleSheet.create({
   rightPanel: {
     position: 'absolute',
     right: 12,
-    top: 262,
-    gap: 10,
-    width: 172
+    top: 52,
+    gap: 8,
+    width: 160,
+    zIndex: 5
   },
   glassCard: {
     borderWidth: 1,
     borderRadius: 12,
     padding: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 7
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 5
   },
   cardTitle: {
     textTransform: 'uppercase',
@@ -890,7 +1109,8 @@ const styles = StyleSheet.create({
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center'
+    alignItems: 'center',
+    marginBottom: 8
   },
   socketRow: {
     marginTop: 6,
@@ -904,11 +1124,11 @@ const styles = StyleSheet.create({
     marginRight: 6
   },
   smallAction: {
-    marginTop: 8,
+    marginTop: 6,
     borderWidth: 1,
-    borderColor: '#33587f',
+    borderColor: '#2d4f73',
     borderRadius: 8,
-    paddingVertical: 6,
+    paddingVertical: 5,
     alignItems: 'center'
   },
   smallActionText: {
@@ -922,52 +1142,54 @@ const styles = StyleSheet.create({
   },
   simBadge: {
     position: 'absolute',
-    top: 236,
-    left: 14,
+    top: 52,
+    left: 12,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderWidth: 1,
-    borderColor: '#93c5fd'
+    borderColor: '#3b82f6'
   },
   simBadgeText: {
-    color: '#eaf4ff',
+    color: '#e0ecff',
     fontWeight: '800',
-    fontSize: 11,
-    letterSpacing: 0.5
+    fontSize: 10,
+    letterSpacing: 0.6
   },
   feedBanner: {
     position: 'absolute',
-    top: 198,
-    left: 14,
-    right: 14,
+    top: 52,
+    left: 12,
+    right: 186,
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingHorizontal: 10,
+    paddingVertical: 7
   },
   feedBannerText: {
-    fontWeight: '800'
+    fontWeight: '800',
+    fontSize: 12
   },
   feedBannerSub: {
     marginTop: 2,
-    fontSize: 12
+    fontSize: 11
   },
   manualHint: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 88,
     left: 14,
     right: 14,
-    backgroundColor: 'rgba(30,58,138,0.86)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(30,58,138,0.88)',
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#60a5fa',
     paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingVertical: 8
   },
   manualHintText: {
     color: '#dbeafe',
-    fontWeight: '700'
+    fontWeight: '700',
+    fontSize: 12
   },
   locationErrorBox: {
     position: 'absolute',
@@ -975,34 +1197,32 @@ const styles = StyleSheet.create({
     left: 14,
     right: 14,
     borderRadius: 10,
-    backgroundColor: 'rgba(120,53,15,0.86)',
+    backgroundColor: 'rgba(120,53,15,0.9)',
     borderWidth: 1,
     borderColor: '#fb923c',
     paddingVertical: 8,
-    paddingHorizontal: 11
+    paddingHorizontal: 12
   },
   locationErrorText: {
     color: '#fed7aa',
+    fontWeight: '700',
+    fontSize: 12
+  },
+  errorActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6
+  },
+  errorActionBtn: {
+    borderWidth: 1,
+    borderColor: '#fb923c',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  errorActionText: {
+    color: '#fed7aa',
+    fontSize: 11,
     fontWeight: '700'
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
