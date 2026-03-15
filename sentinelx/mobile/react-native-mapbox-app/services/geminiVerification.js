@@ -13,7 +13,7 @@ import { API_BASE_URL } from './config';
 
 const SIMULATE_GEMINI = false; // Set to false + add GEMINI_API_KEY for real Gemini calls
 
-const GEMINI_API_KEY = 'AIzaSyB1KeSV4_6e5spPeNyjYNLC8nqycD8gTUM'; // e.g. 'AIza...'
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
 // ─── Simulated AI responses per incident type ──────────────────────────────
