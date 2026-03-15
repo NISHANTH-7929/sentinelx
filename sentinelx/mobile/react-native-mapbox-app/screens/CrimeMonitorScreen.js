@@ -18,6 +18,7 @@ import AreaSearchModal from '../components/AreaSearchModal';
 import CrimeFilterDrawer from '../components/CrimeFilterDrawer';
 import CrimeIncidentDetailsModal from '../components/CrimeIncidentDetailsModal';
 import CrimeMonitorStatsScreen from './CrimeMonitorStatsScreen';
+import AnimatedPin from '../components/AnimatedPin';
 
 import { MAPBOX_ACCESS_TOKEN } from '../services/config';
 import {
@@ -158,7 +159,7 @@ export default function CrimeMonitorScreen() {
   const [showAreaSearch, setShowAreaSearch] = useState(false);
   const [filterVisible, setFilterVisible] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
-  const [showMicrozones, setShowMicrozones] = useState(true);
+  const [showMicrozones, setShowMicrozones] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showMarkers, setShowMarkers] = useState(true);
   const [showStats, setShowStats] = useState(false);
@@ -167,7 +168,7 @@ export default function CrimeMonitorScreen() {
 
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [tapSummary, setTapSummary] = useState(null);
-  const [scanRadiusMeters, setScanRadiusMeters] = useState(DEFAULT_SCAN_RADIUS_METERS);
+  const [scanRadiusMeters, setScanRadiusMeters] = useState(800);
   const [focusCoordinate, setFocusCoordinate] = useState(null);
   const [followCurrentLocation, setFollowCurrentLocation] = useState(true);
 
@@ -326,8 +327,7 @@ export default function CrimeMonitorScreen() {
       setSelectedState(foundRegion.state);
       setSelectedDistrict(foundRegion.district);
       setSelectedArea(foundRegion.area);
-      // Move focus to the matched area center so crime data refreshes for it
-      moveFocusToArea(foundRegion.state, foundRegion.district, foundRegion.area);
+      // Removed moveFocusToArea so the map stays exactly where the user clicked
     }
   };
 
@@ -372,10 +372,11 @@ export default function CrimeMonitorScreen() {
     <View style={styles.container}>
       <Mapbox.MapView
         style={StyleSheet.absoluteFillObject}
-        styleURL={isDarkMode ? Mapbox.StyleURL.TrafficNight : Mapbox.StyleURL.Street}
+        styleURL={Mapbox.StyleURL.Standard}
         logoEnabled={false}
         attributionEnabled={false}
-        compassEnabled
+        compassEnabled={false}
+        scaleBarEnabled={false}
         onPress={onMapPress}>
         <Mapbox.Camera
           ref={cameraRef}
@@ -405,9 +406,7 @@ export default function CrimeMonitorScreen() {
 
         {focusCoordinate ? (
           <Mapbox.PointAnnotation id="focus-pin" coordinate={focusCoordinate} draggable onDragEnd={onPinDragEnd}>
-            <View style={styles.focusPinOuter}>
-              <View style={styles.focusPinInner} />
-            </View>
+            <AnimatedPin color="#3b82f6" />
           </Mapbox.PointAnnotation>
         ) : null}
       </Mapbox.MapView>

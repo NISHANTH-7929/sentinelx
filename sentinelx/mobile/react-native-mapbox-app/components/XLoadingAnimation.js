@@ -1,86 +1,69 @@
+/**
+ * XLoadingAnimation — Premium animated spinner for SentinelX.
+ * Uses three concentric arcs at different speeds for a professional look.
+ * 100% Animated API — no external libraries needed.
+ */
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 
-export default function XLoadingAnimation({ size = 40, color = '#60a5fa', style }) {
-  const pulseAnim = useRef(new Animated.Value(0)).current;
+function Arc({ size, thickness, color, duration, reverse }) {
+  const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 900,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0,
-          duration: 900,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true
-        })
-      ])
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration,
+        easing: Easing.linear,
+        useNativeDriver: true
+      })
     ).start();
-  }, [pulseAnim]);
+  }, [rotation, duration]);
 
-  const scale = pulseAnim.interpolate({
+  const spin = rotation.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.85, 1.15]
+    outputRange: reverse ? ['360deg', '0deg'] : ['0deg', '360deg']
   });
-
-  const opacity = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.6, 1]
-  });
-
-  const lineThickness = Math.max(2, size * 0.18);
 
   return (
-    <View style={[styles.container, { width: size, height: size }, style]}>
-      <Animated.View
-        style={[
-          styles.animatedBox,
-          { width: size, height: size, transform: [{ scale }], opacity }
-        ]}>
-        <View
-          style={[
-            styles.line,
-            {
-              width: lineThickness,
-              height: size,
-              backgroundColor: color,
-              transform: [{ rotate: '45deg' }]
-            }
-          ]}
-        />
-        <View
-          style={[
-            styles.line,
-            {
-              width: lineThickness,
-              height: size,
-              backgroundColor: color,
-              transform: [{ rotate: '-45deg' }]
-            }
-          ]}
-        />
-      </Animated.View>
-    </View>
+    <Animated.View
+      style={{
+        position: 'absolute',
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: thickness,
+        borderColor: 'transparent',
+        borderTopColor: color,
+        borderRightColor: `${color}44`,
+        transform: [{ rotate: spin }]
+      }}
+    />
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  animatedBox: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative'
-  },
-  line: {
-    position: 'absolute',
-    borderRadius: 999
-  }
-});
+export default function XLoadingAnimation({ size = 40, color = '#3b82f6', style }) {
+  const ring1 = size;
+  const ring2 = size * 0.74;
+  const ring3 = size * 0.50;
+  const thick = Math.max(2, size * 0.10);
+
+  return (
+    <View style={[{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }, style]}>
+      {/* Outer ring — clockwise, slower */}
+      <Arc size={ring1} thickness={thick} color={color} duration={1400} reverse={false} />
+      {/* Middle ring — counter-clockwise, medium */}
+      <Arc size={ring2} thickness={thick} color={`${color}CC`} duration={900} reverse={true} />
+      {/* Inner ring — clockwise, fast */}
+      <Arc size={ring3} thickness={thick} color={`${color}88`} duration={600} reverse={false} />
+
+      {/* Tiny center dot */}
+      <View style={{
+        width: size * 0.12,
+        height: size * 0.12,
+        borderRadius: size * 0.06,
+        backgroundColor: color
+      }} />
+    </View>
+  );
+}

@@ -1,4 +1,5 @@
-import React, { useContext } from 'react';
+import React, { useCallback, useContext, useRef } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MapScreen from '../screens/MapScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -11,61 +12,107 @@ import {
   ReportIcon,
   SettingsIcon
 } from '../components/icons/TabIcons';
+import { Text } from 'react-native';
 
 const Tab = createBottomTabNavigator();
 
-const OperationsTabIcon = ({ color, focused }) => (
-  <OperationsIcon size={focused ? 24 : 22} color={color} />
-);
+// ─── Animated Tab Button ─────────────────────────────────────────────────────
+function AnimatedTabButton({ children, onPress, ...props }) {
+  // Check multiple potential sources for focus state in v7
+  const focused = props.accessibilityState?.selected ?? props['aria-selected'] ?? props.focused ?? false;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
-const CrimeMonitorTabIcon = ({ color, focused }) => (
-  <CrimeMonitorIcon size={focused ? 24 : 22} color={color} />
-);
+  const handlePress = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 0.80,
+        duration: 90,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 4,
+        tension: 130,
+        useNativeDriver: true
+      })
+    ]).start();
+    onPress?.();
+  }, [scaleAnim, onPress]);
 
-const ReportTabIcon = ({ color, focused }) => (
-  <ReportIcon size={focused ? 24 : 22} color={color} />
-);
+  return (
+    <Pressable
+      onPress={handlePress}
+      style={styles.tabBtn}
+      android_ripple={null}>
+      <Animated.View style={[styles.tabInner, { transform: [{ scale: scaleAnim }] }]}>
+        {children}
+        {focused && <View style={styles.activeDot} />}
+      </Animated.View>
+    </Pressable>
+  );
+}
 
-const SettingsTabIcon = ({ color, focused }) => (
-  <SettingsIcon size={focused ? 24 : 22} color={color} />
-);
+const makeIcon = (Icon) =>
+  function TabIcon({ color, focused }) {
+    return <Icon size={focused ? 24 : 22} color={color} />;
+  };
+
+const OperationsTabIcon = makeIcon(OperationsIcon);
+const CrimeMonitorTabIcon = makeIcon(CrimeMonitorIcon);
+const ReportTabIcon = makeIcon(ReportIcon);
+const SettingsTabIcon = makeIcon(SettingsIcon);
 
 export default function TabNavigator() {
   const { isDarkMode } = useContext(ThemeContext);
 
   return (
     <Tab.Navigator
-      screenOptions={{
+      /**
+       * CRITICAL FIX FOR MAPBOX TAB FREEZE:
+       * lazy={false}  → All screens are mounted on first render (not on first visit).
+       *
+       * Per-screen: unmountOnBlur={false} → Screens are NEVER unmounted when you
+       * switch tabs.  This prevents MapView from being destroyed and re-created,
+       * which is the root cause of the Mapbox freeze / black-screen bug.
+       */
+      screenOptions={({}) => ({
         headerShown: false,
+        lazy: false,
+        freezeOnBlur: false,
+        tabBarButton: AnimatedTabButton,
         tabBarStyle: {
-          backgroundColor: isDarkMode ? 'rgba(12,22,37,0.95)' : 'rgba(255,255,255,0.96)',
+          backgroundColor: isDarkMode ? 'rgba(6,10,20,0.97)' : 'rgba(255,255,255,0.97)',
           borderTopWidth: 0,
-          height: 72,
+          height: 70,
           paddingTop: 6,
           paddingBottom: 10,
-          shadowColor: '#0f172a',
-          shadowOffset: { width: 0, height: -3 },
-          shadowOpacity: 0.12,
-          shadowRadius: 10,
-          elevation: 10
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: isDarkMode ? 0.4 : 0.12,
+          shadowRadius: 16,
+          elevation: 16
         },
-        tabBarActiveTintColor: isDarkMode ? '#f8fafc' : '#0f172a',
-        tabBarInactiveTintColor: '#7f9bb8',
+        tabBarActiveTintColor: isDarkMode ? '#60a5fa' : '#2563eb',
+        tabBarInactiveTintColor: isDarkMode ? '#334155' : '#94a3b8',
         tabBarLabelStyle: {
           fontWeight: '700',
           fontSize: 11,
-          marginTop: 1
-        },
-        tabBarIconStyle: {
-          marginTop: 1
+          marginTop: 2
         }
-      }}>
+      })}>
+
+      {/*
+        * unmountOnBlur={false} on every screen ensures Mapbox MapView
+        * (and all other screens) stay mounted through tab-switching.
+        */}
       <Tab.Screen
         name="Operations"
         component={MapScreen}
         options={{
           tabBarLabel: 'Live Map',
-          tabBarIcon: OperationsTabIcon
+          tabBarIcon: OperationsTabIcon,
+          unmountOnBlur: false
         }}
       />
       <Tab.Screen
@@ -73,7 +120,8 @@ export default function TabNavigator() {
         component={CrimeMonitorScreen}
         options={{
           tabBarLabel: 'Crime Intel',
-          tabBarIcon: CrimeMonitorTabIcon
+          tabBarIcon: CrimeMonitorTabIcon,
+          unmountOnBlur: false
         }}
       />
       <Tab.Screen
@@ -81,7 +129,8 @@ export default function TabNavigator() {
         component={ReportHubScreen}
         options={{
           tabBarLabel: 'File Report',
-          tabBarIcon: ReportTabIcon
+          tabBarIcon: ReportTabIcon,
+          unmountOnBlur: false
         }}
       />
       <Tab.Screen
@@ -89,9 +138,34 @@ export default function TabNavigator() {
         component={SettingsScreen}
         options={{
           tabBarLabel: 'Settings',
-          tabBarIcon: SettingsTabIcon
+          tabBarIcon: SettingsTabIcon,
+          unmountOnBlur: false
         }}
       />
     </Tab.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBtn: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 4
+  },
+  tabInner: {
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  activeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#60a5fa',
+    marginTop: 4,
+    shadowColor: '#60a5fa',
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 4
+  }
+});

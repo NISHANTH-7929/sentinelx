@@ -57,6 +57,7 @@ import RegionSelectorPanel from '../components/RegionSelectorPanel';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../theme/ThemeContext';
 import { useUserLocation } from '../hooks/useUserLocation';
+import AnimatedPin from '../components/AnimatedPin';
 import { useAIIncidentStore } from '../services/aiIncidentStore';
 import { enrichIncident, getSeverityWeight } from '../services/incidentClassifier';
 import {
@@ -78,7 +79,9 @@ import {
 } from '../services/regions';
 import { distanceMeters } from '../services/geo';
 
-Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
+// NOTE: Mapbox.setAccessToken is called once globally in App.js at module scope.
+// Do NOT call it here — re-initializing Mapbox inside a component causes the
+// "map stuck on tab switch" bug by resetting the native GL context.
 
 const GRID_SIZE_METERS = 500;
 const TAP_RADIUS_METERS = 500;
@@ -296,7 +299,7 @@ export default function MapScreen() {
 
   const [zonesSource, setZonesSource] = useState(EMPTY_GEOJSON);
   const [isControlsExpanded, setIsControlsExpanded] = useState(false);
-  const [showSafetyScore, setShowSafetyScore] = useState(false);
+  const [showSafetyScore, setShowSafetyScore] = useState(true);
   
   // Flag to know if area change was from a tap
   const isTapNavigation = useRef(false);
@@ -485,6 +488,35 @@ export default function MapScreen() {
     }
   }, [areaConfig, loadIncidentsForArea]);
 
+  // Auto-focus on live location when coordinate is first resolved
+  const hasAutoCentered = useRef(false);
+  useEffect(() => {
+    if (coordinate && !hasAutoCentered.current && mountedRef.current) {
+      hasAutoCentered.current = true;
+      
+      const foundRegion = findAreaByCoordinate(coordinate[0], coordinate[1]);
+      if (foundRegion) {
+        isTapNavigation.current = true; // Prevent areaConfig effect from fighting the camera
+        setSelectedState(foundRegion.state);
+        setSelectedDistrict(foundRegion.district);
+        setSelectedArea(foundRegion.area);
+      }
+
+      cameraRef.current?.setCamera({
+        centerCoordinate: coordinate,
+        zoomLevel: 14,
+        animationDuration: 1200
+      });
+      
+      // Auto-trigger nearby lookup on load
+      setTimeout(() => {
+        if (mountedRef.current) {
+          onMapTap({ geometry: { coordinates: coordinate } });
+        }
+      }, 1500);
+    }
+  }, [coordinate, onMapTap]);
+
   const allAiIncidents = useAIIncidentStore();
   const aiVerifiedIncidents = useMemo(
     () => allAiIncidents.filter((i) => i.status === 'VERIFIED'),
@@ -648,10 +680,12 @@ export default function MapScreen() {
     <View style={styles.container}>
       <Mapbox.MapView
         style={StyleSheet.absoluteFillObject}
-        styleURL={isDarkMode ? Mapbox.StyleURL.TrafficNight : Mapbox.StyleURL.Street}
+        styleURL={Mapbox.StyleURL.Standard}
         onPress={onMapTap}
         onLongPress={onMapLongPress}
-        compassEnabled
+        surfaceView={false} // CRITICAL FIX: Forces Android TextureView so map survives tab switches
+        compassEnabled={false}
+        scaleBarEnabled={false}
         logoEnabled={false}
         attributionEnabled={false}
         pitchEnabled
@@ -792,6 +826,7 @@ export default function MapScreen() {
           {/* AI Verified incidents — green ring, larger marker */}
           <Mapbox.CircleLayer
             id="ai-verified-layer"
+            existing={false}
             filter={['==', ['get', 'aiVerified'], true]}
             style={{
               circleColor: '#16a34a',
@@ -821,6 +856,12 @@ export default function MapScreen() {
             }}
           />
         </Mapbox.ShapeSource>
+
+        {tapCoordinate ? (
+          <Mapbox.PointAnnotation id="tap-pin" coordinate={tapCoordinate}>
+            <AnimatedPin color="#3b82f6" />
+          </Mapbox.PointAnnotation>
+        ) : null}
 
         {/* Pulsing rings for newly arrived incidents (visible for 12 s) */}
         {allStreamIncidents
@@ -926,7 +967,7 @@ export default function MapScreen() {
                     ];
                     for (const t of testTypes) {
                       try {
-                        await fetch(`${API_BASE_URL}/api/incidents`, {
+                        const res = await fetch(`${API_BASE_URL}/api/incidents`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -935,11 +976,17 @@ export default function MapScreen() {
                             latitude: t.lat,
                             longitude: t.lng,
                             confidence: t.confidence,
-                            source: 'simulator'
+                            source: simulationMode ? 'simulator' : 'user'
                           })
                         });
+                        if (!res.ok) {
+                          const errText = await res.text();
+                          console.warn('Inject Failed:', res.status, errText);
+                        }
                         await new Promise(r => setTimeout(r, 400));
-                      } catch (_) {}
+                      } catch (err) {
+                        console.warn('Inject request failed:', err.message);
+                      }
                     }
                   }}>
                   <Text style={[styles.smallActionText, { color: '#ef4444' }]}>🚨 Inject Nearby Alerts</Text>

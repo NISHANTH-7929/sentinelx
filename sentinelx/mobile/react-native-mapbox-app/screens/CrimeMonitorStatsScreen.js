@@ -1,5 +1,5 @@
-import React, { useContext, useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useContext, useEffect, useMemo, useRef } from 'react';
+import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeContext } from '../theme/ThemeContext';
 
@@ -22,35 +22,163 @@ const changeColor = (value) => {
   return '#94a3b8';
 };
 
-const ScoreRing = ({ score, band, styles }) => {
-  const fillAngle = (score / 100) * 360;
+// ── Animated Score Ring ───────────────────────────────────────────────────────
+const ScoreRing = ({ score, band, styles, isDarkMode }) => {
+  const countAnim = useRef(new Animated.Value(0)).current;
+  const ringScale = useRef(new Animated.Value(0.7)).current;
+  const ringOpacity = useRef(new Animated.Value(0)).current;
+  const [displayScore, setDisplayScore] = React.useState(0);
+
+  useEffect(() => {
+    countAnim.addListener(({ value }) => setDisplayScore(Math.round(value)));
+
+    Animated.parallel([
+      Animated.spring(ringScale, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }),
+      Animated.timing(ringOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(countAnim, {
+        toValue: score,
+        duration: 1200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false
+      })
+    ]).start();
+
+    return () => countAnim.removeAllListeners();
+  }, [score, countAnim, ringScale, ringOpacity]);
+
+  const ringColor = band?.color || '#3b82f6';
+
   return (
-    <View style={styles.scoreRingOuter}>
-      <View style={[styles.scoreRingFill, { borderColor: band?.color || '#3b82f6' }]} />
+    <Animated.View
+      style={[
+        styles.scoreRingOuter,
+        {
+          borderColor: ringColor,
+          transform: [{ scale: ringScale }],
+          opacity: ringOpacity,
+          shadowColor: ringColor,
+          shadowOpacity: 0.5,
+          shadowRadius: 12,
+          elevation: 8
+        }
+      ]}>
+      <View style={[styles.scoreRingFill, { borderColor: ringColor }]} />
       <View style={styles.scoreRingCenter}>
-        <Text style={styles.scoreRingValue}>{score}</Text>
+        <Text style={[styles.scoreRingValue, { color: ringColor }]}>{displayScore}</Text>
         <Text style={styles.scoreRingLabel}>{band?.label || 'Score'}</Text>
       </View>
-    </View>
+    </Animated.View>
   );
 };
 
-const BarRow = ({ label, value, maxValue, color, pct, styles }) => {
-  const width = maxValue > 0 ? Math.max(6, (value / maxValue) * 100) : 6;
+// ── Animated Bar Row ──────────────────────────────────────────────────────────
+const BarRow = ({ label, value, maxValue, color, delay, styles }) => {
+  const barWidth = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  const targetPct = maxValue > 0 ? Math.max(4, (value / maxValue) * 100) : 4;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 300,
+        delay,
+        useNativeDriver: false
+      }),
+      Animated.timing(barWidth, {
+        toValue: targetPct,
+        duration: 700,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false
+      })
+    ]).start();
+  }, [barWidth, opacity, targetPct, delay]);
+
   return (
-    <View style={styles.barRow}>
+    <Animated.View style={[styles.barRow, { opacity }]}>
       <Text style={styles.barLabel} numberOfLines={1}>{label}</Text>
       <View style={styles.barTrack}>
-        <View style={[styles.barFill, { width: `${width}%`, backgroundColor: color || '#4a90c7' }]} />
+        <Animated.View
+          style={[
+            styles.barFill,
+            {
+              width: barWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+              backgroundColor: color || '#4a90c7'
+            }
+          ]}
+        />
       </View>
       <Text style={styles.barCount}>{value}</Text>
-    </View>
+    </Animated.View>
   );
 };
 
-export default function CrimeMonitorStatsScreen({ area, monthLabel, snapshot, sourceText, lastUpdated, onBack }) {
+// ── Animated Week Bar ─────────────────────────────────────────────────────────
+const WeekBar = ({ item, maxValue, delay, styles }) => {
+  const barHeight = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const targetH = maxValue > 0 ? Math.max(4, (item.count / maxValue) * 80) : 4;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 300, delay, useNativeDriver: false }),
+      Animated.timing(barHeight, {
+        toValue: targetH,
+        duration: 600,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false
+      })
+    ]).start();
+  }, [barHeight, opacity, targetH, delay]);
+
+  return (
+    <Animated.View style={[styles.weekBarWrap, { opacity }]}>
+      <View style={styles.weekColumn}>
+        <Animated.View
+          style={[styles.weekBar, { height: barHeight, backgroundColor: item.color || '#4a90c7' }]}
+        />
+      </View>
+      <Text style={styles.weekLabel}>{item.week}</Text>
+      <Text style={styles.weekCount}>{item.count}</Text>
+    </Animated.View>
+  );
+};
+
+// ── Section Card wrapper with fade+slide ──────────────────────────────────────
+const AnimatedSection = ({ children, delay, styles, style }) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(18)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 450, delay, useNativeDriver: true }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 400,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true
+      })
+    ]).start();
+  }, [opacity, translateY, delay]);
+
+  return (
+    <Animated.View style={[styles.section, style, { opacity, transform: [{ translateY }] }]}>
+      {children}
+    </Animated.View>
+  );
+};
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
+export default function CrimeMonitorStatsScreen({
+  area, monthLabel, snapshot, sourceText, lastUpdated, onBack
+}) {
   const insets = useSafeAreaInsets();
   const { isDarkMode } = useContext(ThemeContext);
+  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode]);
 
   const bg = isDarkMode ? '#071a2e' : '#f0f6fc';
   const cardBg = isDarkMode ? '#0e2439' : '#ffffff';
@@ -58,16 +186,25 @@ export default function CrimeMonitorStatsScreen({ area, monthLabel, snapshot, so
   const textPrimary = isDarkMode ? '#eaf4ff' : '#0f172a';
   const textSecondary = isDarkMode ? '#6085a6' : '#475569';
   const backBg = isDarkMode ? 'rgba(14,36,57,0.7)' : 'rgba(220,235,248,0.7)';
-  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode]);
+
+  // Header slide-in
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+  const headerSlide = useRef(new Animated.Value(-16)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(headerOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+      Animated.timing(headerSlide, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    ]).start();
+  }, [headerOpacity, headerSlide]);
 
   const maxCategoryValue = useMemo(() => {
     if (!snapshot?.categoryBreakdown?.length) return 1;
-    return Math.max(1, ...snapshot.categoryBreakdown.map((item) => item.count));
+    return Math.max(1, ...snapshot.categoryBreakdown.map((i) => i.count));
   }, [snapshot?.categoryBreakdown]);
 
   const maxWeekValue = useMemo(() => {
     if (!snapshot?.weeklyTrend?.length) return 1;
-    return Math.max(1, ...snapshot.weeklyTrend.map((item) => item.count));
+    return Math.max(1, ...snapshot.weeklyTrend.map((i) => i.count));
   }, [snapshot?.weeklyTrend]);
 
   if (!snapshot) {
@@ -80,127 +217,107 @@ export default function CrimeMonitorStatsScreen({ area, monthLabel, snapshot, so
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: bg }]}>
-      <View style={[styles.header, { backgroundColor: isDarkMode ? '#071a2e' : '#f0f6fc' }]}>
+      {/* Animated header */}
+      <Animated.View
+        style={[
+          styles.header,
+          { backgroundColor: isDarkMode ? '#071a2e' : '#f0f6fc' },
+          { opacity: headerOpacity, transform: [{ translateY: headerSlide }] }
+        ]}>
         <Pressable style={[styles.backButton, { backgroundColor: backBg }]} onPress={onBack}>
           <Text style={[styles.backText, { color: isDarkMode ? '#60a5fa' : '#2563eb' }]}>← Back</Text>
         </Pressable>
         <Text style={[styles.title, { color: textPrimary }]}>Crime Statistics</Text>
-      </View>
+      </Animated.View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Area + Time */}
+        {/* Info pills */}
         <View style={styles.infoRow}>
-          <View style={[styles.infoPill, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <Text style={[styles.infoText, { color: textSecondary }]}>{area || 'All'}</Text>
-          </View>
-          <View style={[styles.infoPill, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <Text style={[styles.infoText, { color: textSecondary }]}>{monthLabel || '--'}</Text>
-          </View>
-          <View style={[styles.infoPill, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <Text style={[styles.infoText, { color: textSecondary }]}>{snapshot.totalIncidents} incidents</Text>
-          </View>
+          {[area || 'All', monthLabel || '--', `${snapshot.totalIncidents} incidents`].map((txt, i) => (
+            <View key={i} style={[styles.infoPill, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+              <Text style={[styles.infoText, { color: textSecondary }]}>{txt}</Text>
+            </View>
+          ))}
         </View>
 
         {/* Safety Score */}
-        <View style={[styles.section, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <AnimatedSection delay={100} styles={styles} style={{ backgroundColor: cardBg, borderColor: cardBorder }}>
           <Text style={[styles.sectionTitle, { color: textPrimary }]}>Safety Score</Text>
           <View style={styles.scoreRow}>
-            <ScoreRing styles={styles} score={snapshot.currentScore} band={snapshot.currentBand} />
+            <ScoreRing styles={styles} score={snapshot.currentScore} band={snapshot.currentBand} isDarkMode={isDarkMode} />
             <View style={styles.scoreDetails}>
-              <View style={styles.scoreStatRow}>
-                <Text style={[styles.scoreStatLabel, { color: textSecondary }]}>Current</Text>
-                <Text style={[styles.scoreStatValue, { color: snapshot.currentBand?.color || '#fff' }]}>
-                  {snapshot.currentScore}
-                </Text>
-              </View>
-              <View style={styles.scoreStatRow}>
-                <Text style={[styles.scoreStatLabel, { color: textSecondary }]}>Last Week</Text>
-                <Text style={[styles.scoreStatValue, { color: textPrimary }]}>{snapshot.previousScore}</Text>
-              </View>
-              <View style={styles.scoreStatRow}>
-                <Text style={[styles.scoreStatLabel, { color: textSecondary }]}>Change</Text>
-                <Text style={[styles.scoreStatValue, { color: changeColor(snapshot.scoreChangePct) }]}>
-                  {changeArrow(snapshot.scoreChangePct)}
-                </Text>
-              </View>
+              {[
+                { label: 'Current', value: snapshot.currentScore, color: snapshot.currentBand?.color || '#fff' },
+                { label: 'Last Week', value: snapshot.previousScore, color: textPrimary },
+                { label: 'Change', value: changeArrow(snapshot.scoreChangePct), color: changeColor(snapshot.scoreChangePct) }
+              ].map(({ label, value, color }) => (
+                <View key={label} style={styles.scoreStatRow}>
+                  <Text style={[styles.scoreStatLabel, { color: textSecondary }]}>{label}</Text>
+                  <Text style={[styles.scoreStatValue, { color }]}>{value}</Text>
+                </View>
+              ))}
             </View>
           </View>
-        </View>
+        </AnimatedSection>
 
-        {/* Category breakdown */}
-        <View style={[styles.section, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        {/* Category Breakdown */}
+        <AnimatedSection delay={220} styles={styles} style={{ backgroundColor: cardBg, borderColor: cardBorder }}>
           <Text style={[styles.sectionTitle, { color: textPrimary }]}>Crime Breakdown</Text>
           {snapshot.categoryBreakdown?.length ? (
-            snapshot.categoryBreakdown.map((item) => (
+            snapshot.categoryBreakdown.map((item, i) => (
               <BarRow
                 key={item.category}
                 label={item.category}
                 value={item.count}
                 maxValue={maxCategoryValue}
                 color={item.color || SEVERITY_COLORS[item.topSeverity] || '#4a90c7'}
+                delay={i * 60}
                 styles={styles}
               />
             ))
           ) : (
             <Text style={styles.empty}>No data for selected filters.</Text>
           )}
-        </View>
+        </AnimatedSection>
 
         {/* Weekly Trend */}
-        <View style={[styles.section, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+        <AnimatedSection delay={360} styles={styles} style={{ backgroundColor: cardBg, borderColor: cardBorder }}>
           <Text style={[styles.sectionTitle, { color: textPrimary }]}>Weekly Trend</Text>
           {snapshot.weeklyTrend?.length ? (
             <View style={styles.weeklyGrid}>
-              {snapshot.weeklyTrend.map((item) => {
-                const height = maxWeekValue > 0 ? Math.max(6, (item.count / maxWeekValue) * 80) : 6;
-                return (
-                  <View key={item.week} style={styles.weekBarWrap}>
-                    <View style={styles.weekColumn}>
-                      <View style={[styles.weekBar, { height, backgroundColor: item.color || '#4a90c7' }]} />
-                    </View>
-                    <Text style={styles.weekLabel}>{item.week}</Text>
-                    <Text style={styles.weekCount}>{item.count}</Text>
-                  </View>
-                );
-              })}
+              {snapshot.weeklyTrend.map((item, i) => (
+                <WeekBar key={item.week} item={item} maxValue={maxWeekValue} delay={i * 80} styles={styles} />
+              ))}
             </View>
           ) : (
             <Text style={styles.empty}>No weekly data.</Text>
           )}
-        </View>
+        </AnimatedSection>
 
         {/* Month comparison */}
         {snapshot.monthComparison ? (
-          <View style={[styles.section, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <AnimatedSection delay={480} styles={styles} style={{ backgroundColor: cardBg, borderColor: cardBorder }}>
             <Text style={[styles.sectionTitle, { color: textPrimary }]}>Month-over-Month</Text>
             <View style={styles.compareRow}>
-              <View style={styles.compareCol}>
-                <Text style={styles.compareLabel}>This month</Text>
-                <Text style={styles.compareValue}>{snapshot.monthComparison.current}</Text>
-              </View>
-              <View style={styles.compareCol}>
-                <Text style={styles.compareLabel}>Last month</Text>
-                <Text style={styles.compareValue}>{snapshot.monthComparison.previous}</Text>
-              </View>
-              <View style={styles.compareCol}>
-                <Text style={styles.compareLabel}>Change</Text>
-                <Text
-                  style={[
-                    styles.compareValue,
-                    { color: changeColor(snapshot.monthComparison.change) }
-                  ]}>
-                  {changeArrow(snapshot.monthComparison.change)}
-                </Text>
-              </View>
+              {[
+                { label: 'This month', value: snapshot.monthComparison.current, color: textPrimary },
+                { label: 'Last month', value: snapshot.monthComparison.previous, color: textPrimary },
+                { label: 'Change', value: changeArrow(snapshot.monthComparison.change), color: changeColor(snapshot.monthComparison.change) }
+              ].map(({ label, value, color }) => (
+                <View key={label} style={[styles.compareCol, { backgroundColor: isDarkMode ? 'rgba(10,30,52,0.7)' : 'rgba(255,255,255,0.9)', borderColor: cardBorder }]}>
+                  <Text style={[styles.compareLabel, { color: textSecondary }]}>{label}</Text>
+                  <Text style={[styles.compareValue, { color }]}>{value}</Text>
+                </View>
+              ))}
             </View>
-          </View>
+          </AnimatedSection>
         ) : null}
 
-        {/* Source info */}
-        <View style={styles.sourceWrap}>
-          <Text style={styles.sourceLabel}>Data Source</Text>
-          <Text style={styles.sourceValue}>{sourceText || 'SentinelX processed data'}</Text>
-          {lastUpdated ? <Text style={styles.sourceValue}>Updated: {new Date(lastUpdated).toLocaleDateString()}</Text> : null}
+        {/* Source */}
+        <View style={[styles.sourceWrap, { borderColor: cardBorder }]}>
+          <Text style={[styles.sourceLabel, { color: textSecondary }]}>Data Source</Text>
+          <Text style={[styles.sourceValue, { color: textSecondary }]}>{sourceText || 'SentinelX processed data'}</Text>
+          {lastUpdated ? <Text style={[styles.sourceValue, { color: textSecondary }]}>Updated: {new Date(lastUpdated).toLocaleDateString()}</Text> : null}
         </View>
       </ScrollView>
     </View>
@@ -208,139 +325,82 @@ export default function CrimeMonitorStatsScreen({ area, monthLabel, snapshot, so
 }
 
 const getStyles = (isDarkMode) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: isDarkMode ? '#030f1f' : '#e2e8f0'
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#192f49'
+    borderBottomColor: isDarkMode ? '#192f49' : '#dde8f2'
   },
   backButton: {
     borderWidth: 1,
-    borderColor: isDarkMode ? '#3d6d9a' : '#e2e8f0',
+    borderColor: isDarkMode ? '#3d6d9a' : '#cbd5e1',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
     marginRight: 10
   },
-  backText: {
-    color: isDarkMode ? '#d0e2f4' : '#e2e8f0',
-    fontWeight: '800',
-    fontSize: 12
-  },
-  title: {
-    color: isDarkMode ? '#f0f8ff' : '#e2e8f0',
-    fontWeight: '800',
-    fontSize: 18
-  },
-  scroll: {
-    flex: 1
-  },
-  scrollContent: {
-    padding: 14,
-    paddingBottom: 30
-  },
-  infoRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 12
-  },
+  backText: { fontWeight: '800', fontSize: 12 },
+  title: { fontWeight: '800', fontSize: 18 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 14, paddingBottom: 32 },
+  infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   infoPill: {
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2d5a84' : '#e2e8f0',
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 3,
-    backgroundColor: isDarkMode ? 'rgba(15, 40, 68, 0.8)' : 'rgba(255, 255, 255, 0.95)'
+    paddingVertical: 3
   },
-  infoText: {
-    color: isDarkMode ? '#d0e2f4' : '#e2e8f0',
-    fontWeight: '700',
-    fontSize: 11
-  },
+  infoText: { fontWeight: '700', fontSize: 11 },
   section: {
-    marginBottom: 18,
-    borderRadius: 14,
+    marginBottom: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: isDarkMode ? '#1e3a5c' : '#e2e8f0',
-    backgroundColor: isDarkMode ? 'rgba(8, 26, 46, 0.85)' : 'rgba(255, 255, 255, 0.95)',
-    padding: 12
+    padding: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    elevation: 3
   },
-  sectionTitle: {
-    color: isDarkMode ? '#e8f3fe' : '#e2e8f0',
-    fontWeight: '800',
-    fontSize: 14,
-    marginBottom: 10
-  },
-  scoreRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14
-  },
+  sectionTitle: { fontWeight: '800', fontSize: 14, marginBottom: 12 },
+  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   scoreRingOuter: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     borderWidth: 5,
-    borderColor: isDarkMode ? '#1e3a5c' : '#e2e8f0',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: isDarkMode ? 'rgba(5, 18, 32, 0.8)' : 'rgba(255, 255, 255, 0.95)'
+    backgroundColor: isDarkMode ? 'rgba(5,18,32,0.8)' : 'rgba(255,255,255,0.95)'
   },
   scoreRingFill: {
     position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     borderWidth: 5,
-    opacity: 0.3
+    opacity: 0.2
   },
-  scoreRingCenter: {
-    alignItems: 'center'
-  },
-  scoreRingValue: {
-    color: isDarkMode ? '#f0f8ff' : '#e2e8f0',
-    fontWeight: '800',
-    fontSize: 22
-  },
+  scoreRingCenter: { alignItems: 'center' },
+  scoreRingValue: { fontWeight: '900', fontSize: 26 },
   scoreRingLabel: {
-    color: isDarkMode ? '#8fb5d3' : '#e2e8f0',
+    color: isDarkMode ? '#8fb5d3' : '#64748b',
     fontSize: 9,
-    fontWeight: '700'
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5
   },
-  scoreDetails: {
-    flex: 1,
-    gap: 4
-  },
-  scoreStatRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center'
-  },
-  scoreStatLabel: {
-    color: isDarkMode ? '#8fb5d3' : '#e2e8f0',
-    fontSize: 12,
-    fontWeight: '700'
-  },
-  scoreStatValue: {
-    color: isDarkMode ? '#eaf4ff' : '#0f172a',
-    fontSize: 14,
-    fontWeight: '800'
-  },
-  barRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 3
-  },
+  scoreDetails: { flex: 1, gap: 6 },
+  scoreStatRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  scoreStatLabel: { fontSize: 12, fontWeight: '700' },
+  scoreStatValue: { fontSize: 14, fontWeight: '800' },
+  barRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
   barLabel: {
     width: 80,
-    color: isDarkMode ? '#b0cfe2' : '#e2e8f0',
+    color: isDarkMode ? '#b0cfe2' : '#475569',
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'capitalize'
@@ -353,14 +413,11 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     overflow: 'hidden',
     marginHorizontal: 6
   },
-  barFill: {
-    height: '100%',
-    borderRadius: 4
-  },
+  barFill: { height: '100%', borderRadius: 4 },
   barCount: {
     width: 30,
     textAlign: 'right',
-    color: isDarkMode ? '#d0e2f4' : '#e2e8f0',
+    color: isDarkMode ? '#d0e2f4' : '#334155',
     fontWeight: '800',
     fontSize: 11
   },
@@ -371,76 +428,47 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     height: 110,
     paddingTop: 10
   },
-  weekBarWrap: {
-    flex: 1,
-    alignItems: 'center'
-  },
-  weekColumn: {
-    flex: 1,
-    justifyContent: 'flex-end'
-  },
-  weekBar: {
-    borderRadius: 4,
-    minWidth: 14
-  },
+  weekBarWrap: { flex: 1, alignItems: 'center' },
+  weekColumn: { flex: 1, justifyContent: 'flex-end' },
+  weekBar: { borderRadius: 4, minWidth: 14 },
   weekLabel: {
-    color: isDarkMode ? '#8fb5d3' : '#e2e8f0',
+    color: isDarkMode ? '#8fb5d3' : '#64748b',
     fontSize: 10,
     fontWeight: '700',
     marginTop: 4
   },
   weekCount: {
-    color: isDarkMode ? '#d0e2f4' : '#e2e8f0',
+    color: isDarkMode ? '#d0e2f4' : '#334155',
     fontSize: 10,
     fontWeight: '800'
   },
-  compareRow: {
-    flexDirection: 'row',
-    gap: 8
-  },
+  compareRow: { flexDirection: 'row', gap: 8 },
   compareCol: {
     flex: 1,
     borderWidth: 1,
-    borderColor: isDarkMode ? '#1e3a5c' : '#e2e8f0',
-    borderRadius: 10,
-    padding: 8,
-    alignItems: 'center',
-    backgroundColor: isDarkMode ? 'rgba(10, 30, 52, 0.7)' : 'rgba(255, 255, 255, 0.9)'
-  },
-  compareLabel: {
-    color: isDarkMode ? '#8fb5d3' : '#e2e8f0',
-    fontSize: 10,
-    fontWeight: '700'
-  },
-  compareValue: {
-    color: isDarkMode ? '#eaf4ff' : '#0f172a',
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 3
-  },
-  sourceWrap: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: isDarkMode ? '#1e3a5c' : '#e2e8f0',
+    borderRadius: 12,
     padding: 10,
-    backgroundColor: isDarkMode ? 'rgba(5, 18, 32, 0.7)' : 'rgba(255, 255, 255, 0.9)'
+    alignItems: 'center'
+  },
+  compareLabel: { fontSize: 10, fontWeight: '700' },
+  compareValue: { fontSize: 16, fontWeight: '800', marginTop: 4 },
+  sourceWrap: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    backgroundColor: isDarkMode ? 'rgba(5,18,32,0.7)' : 'rgba(255,255,255,0.9)'
   },
   sourceLabel: {
-    color: isDarkMode ? '#8fb5d3' : '#e2e8f0',
     fontWeight: '800',
     fontSize: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.6
   },
-  sourceValue: {
-    color: isDarkMode ? '#7a9cb8' : '#e2e8f0',
-    fontSize: 10,
-    marginTop: 3
-  },
+  sourceValue: { fontSize: 10, marginTop: 3 },
   empty: {
-    color: isDarkMode ? '#6b8fb5' : '#e2e8f0',
     fontStyle: 'italic',
     textAlign: 'center',
-    marginVertical: 10
+    marginVertical: 10,
+    color: isDarkMode ? '#6b8fb5' : '#94a3b8'
   }
 });

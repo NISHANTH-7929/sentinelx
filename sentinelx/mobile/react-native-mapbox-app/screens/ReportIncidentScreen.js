@@ -229,7 +229,7 @@ export default function ReportIncidentScreen() {
           )}
           <View style={styles.locationActions}>
             <Pressable
-              style={[styles.actionBtn, { flex: 1, backgroundColor: '#1e40af', opacity: isLocating ? 0.6 : 1, marginRight: 8 }]}
+              style={[styles.actionBtn, { flex: 1, backgroundColor: c.primary, opacity: isLocating ? 0.6 : 1 }]}
               onPress={captureGPS}
               disabled={isLocating}>
               {isLocating
@@ -238,10 +238,10 @@ export default function ReportIncidentScreen() {
             </Pressable>
             
             <Pressable
-              style={[styles.actionBtn, { flex: 1, backgroundColor: '#0ea5e9', opacity: isLocating ? 0.6 : 1 }]}
+              style={[styles.actionBtn, { flex: 1, backgroundColor: c.border, opacity: isLocating ? 0.6 : 1 }]}
               onPress={() => setShowMapPicker(true)}
               disabled={isLocating}>
-              <Text style={styles.actionBtnText}>🗺 Map Picker</Text>
+              <Text style={[styles.actionBtnText, { color: c.text }]}>🗺 Map Picker</Text>
             </Pressable>
           </View>
         </View>
@@ -249,7 +249,7 @@ export default function ReportIncidentScreen() {
         {/* === Description === */}
         <Text style={[styles.sectionLabel, { color: c.textMuted }]}>DESCRIPTION</Text>
         <TextInput
-          style={[styles.textArea, { backgroundColor: c.card, borderColor: c.border, color: c.text }]}
+          style={[styles.textArea, { backgroundColor: c.bg, borderColor: c.border, color: c.text }]}
           multiline
           numberOfLines={4}
           placeholder="Briefly describe what is happening..."
@@ -273,10 +273,10 @@ export default function ReportIncidentScreen() {
             <Text style={[styles.locationHint, { color: c.textMuted }]}>No media attached</Text>
           )}
           <View style={styles.mediaButtons}>
-            <Pressable style={[styles.mediaBtn, { borderColor: c.border, backgroundColor: c.card }]} onPress={captureFromCamera}>
-              <Text style={[styles.mediaBtnText, { color: c.text }]}>📷 Camera</Text>
+            <Pressable style={[styles.mediaBtn, { backgroundColor: c.primary, borderColor: c.primary }]} onPress={captureFromCamera}>
+              <Text style={[styles.mediaBtnText, { color: '#fff' }]}>📷 Camera</Text>
             </Pressable>
-            <Pressable style={[styles.mediaBtn, { borderColor: c.border, backgroundColor: c.card }]} onPress={pickFromGallery}>
+            <Pressable style={[styles.mediaBtn, { backgroundColor: c.bg, borderColor: c.border }]} onPress={pickFromGallery}>
               <Text style={[styles.mediaBtnText, { color: c.text }]}>🖼 Gallery</Text>
             </Pressable>
           </View>
@@ -394,7 +394,8 @@ export default function ReportIncidentScreen() {
               style={{ flex: 1 }}
               styleURL={c.isDarkMode ? Mapbox.StyleURL.TrafficNight : Mapbox.StyleURL.Street}
               onCameraChanged={onMapRegionChange}
-              compassEnabled
+              compassEnabled={false}
+              scaleBarEnabled={false}
               logoEnabled={false}
               attributionEnabled={false}
             >
@@ -419,236 +420,290 @@ export default function ReportIncidentScreen() {
 }
 
 const DARK = {
-  bg: '#071a2e',
-  card: '#0e243a',
-  border: '#1c3f60',
-  text: '#eaf4ff',
-  textMuted: '#6085a6'
+  bg: '#040d1a',
+  card: '#0c1a2e',
+  border: '#1e3857',
+  text: '#f1f5f9',
+  textMuted: '#64748b',
+  primary: '#3b82f6',
+  danger: '#ef4444'
 };
 
 const LIGHT = {
-  bg: '#f0f6fc',
+  bg: '#f8fafc',
   card: '#ffffff',
-  border: '#dde8f2',
+  border: '#e2e8f0',
   text: '#0f172a',
-  textMuted: '#64748b'
+  textMuted: '#64748b',
+  primary: '#2563eb',
+  danger: '#dc2626'
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.3
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.5
   },
   headerSub: {
-    fontSize: 12,
-    marginTop: 2,
-    fontWeight: '600'
+    fontSize: 13,
+    marginTop: 4,
+    fontWeight: '600',
+    letterSpacing: 0.2
   },
   scroll: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16
+    paddingHorizontal: 20,
+    paddingTop: 10
   },
   sectionLabel: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 1.2,
-    marginBottom: 8,
-    marginTop: 20
+    letterSpacing: 1.5,
+    marginBottom: 10,
+    marginTop: 24,
+    textTransform: 'uppercase'
   },
   typeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8
+    gap: 10
   },
   typePill: {
     borderWidth: 1.5,
-    borderRadius: 999,
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 9
+    paddingVertical: 10,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1
   },
   typePillText: {
     fontWeight: '700',
-    fontSize: 13
+    fontSize: 13,
+    letterSpacing: 0.2
   },
   card: {
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 10
+    borderRadius: 16,
+    padding: 16,
+    gap: 14,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2
   },
   locationResult: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 10,
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    padding: 12,
+    borderRadius: 10
   },
-  locationDot: { fontSize: 16 },
+  locationDot: { fontSize: 18 },
   locationText: {
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+    fontFamily: 'monospace'
   },
   locationHint: {
-    fontSize: 13,
-    fontStyle: 'italic'
+    fontSize: 14,
+    fontStyle: 'italic',
+    paddingVertical: 4
+  },
+  locationActions: {
+    flexDirection: 'row',
+    gap: 10
   },
   actionBtn: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center'
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6
   },
   actionBtnText: {
     color: '#fff',
     fontWeight: '700',
-    fontSize: 14
+    fontSize: 14,
+    letterSpacing: 0.3
   },
   textArea: {
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    fontSize: 14,
-    minHeight: 90,
-    lineHeight: 20
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 15,
+    minHeight: 110,
+    lineHeight: 22,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 1
   },
   mediaPreviewed: {
     alignItems: 'center',
-    gap: 8
+    gap: 10
   },
   mediaThumb: {
     width: '100%',
-    height: 180,
-    borderRadius: 10
+    height: 200,
+    borderRadius: 12
   },
   mediaRemove: {
-    alignSelf: 'flex-end'
+    alignSelf: 'flex-end',
+    paddingVertical: 4,
+    paddingHorizontal: 8
   },
   mediaRemoveText: {
     color: '#ef4444',
-    fontWeight: '700',
-    fontSize: 13
+    fontWeight: '800',
+    fontSize: 13,
+    letterSpacing: 0.5
   },
   mediaButtons: {
     flexDirection: 'row',
-    gap: 8
+    gap: 10
   },
   mediaBtn: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 11,
-    alignItems: 'center'
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6
   },
   mediaBtnText: {
     fontWeight: '700',
-    fontSize: 13
+    fontSize: 14
   },
   verifyCard: {
-    marginTop: 20,
+    marginTop: 24,
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 16,
-    gap: 12
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4
   },
   verifyTitle: {
-    fontWeight: '800',
-    fontSize: 15,
-    marginBottom: 4
+    fontWeight: '900',
+    fontSize: 18,
+    marginBottom: 4,
+    letterSpacing: 0.3
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    gap: 14
   },
   stepDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center'
   },
   stepDotText: {
     color: '#fff',
-    fontWeight: '800',
-    fontSize: 13
+    fontWeight: '900',
+    fontSize: 14
   },
   stepLabel: {
-    fontSize: 14,
-    fontWeight: '600'
+    fontSize: 15,
+    fontWeight: '700'
   },
   resultCard: {
-    marginTop: 20,
+    marginTop: 24,
     borderWidth: 2,
-    borderRadius: 14,
-    padding: 16,
-    gap: 10
+    borderRadius: 16,
+    padding: 20,
+    gap: 14,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5
   },
   resultHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12
+    gap: 14
   },
-  resultIcon: { fontSize: 28 },
+  resultIcon: { fontSize: 32 },
   resultStatus: {
-    fontWeight: '800',
-    fontSize: 16
+    fontWeight: '900',
+    fontSize: 18,
+    letterSpacing: 0.2
   },
   resultMeta: {
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 13,
+    marginTop: 4,
     fontWeight: '600'
   },
   aiBox: {
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
-    gap: 6
+    borderRadius: 12,
+    padding: 14,
+    gap: 8,
+    marginTop: 6
   },
   aiBoxLabel: {
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 13,
     letterSpacing: 0.5
   },
   aiBoxText: {
-    fontSize: 13,
-    lineHeight: 19
+    fontSize: 14,
+    lineHeight: 22
   },
   signalText: {
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20
   },
   publishedNote: {
     fontWeight: '800',
-    fontSize: 13
+    fontSize: 14,
+    marginTop: 4
   },
   submitBtn: {
-    marginTop: 24,
+    marginTop: 32,
     backgroundColor: '#dc2626',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: 'center',
     shadowColor: '#dc2626',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8
   },
   submitBtnText: {
     color: '#fff',
-    fontWeight: '800',
-    fontSize: 16,
-    letterSpacing: 0.3
+    fontWeight: '900',
+    fontSize: 17,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase'
   },
   footerNote: {
     textAlign: 'center',
-    fontSize: 11,
-    marginTop: 24,
-    lineHeight: 17
+    fontSize: 12,
+    marginTop: 28,
+    lineHeight: 18,
+    fontWeight: '600'
   }
 });

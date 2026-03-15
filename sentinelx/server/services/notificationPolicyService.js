@@ -6,6 +6,20 @@ const startOfUtcDay = (date = new Date()) => {
   return dayStart;
 };
 
+/**
+ * Returns true if a push notification has NOT yet been sent to this user for
+ * this incident (i.e. it is safe to send one now).
+ */
+const canSendPushForIncident = async ({ incidentId, userId }) => {
+  const existing = await NotificationLog.findOne({
+    incident_id: incidentId,
+    user_id: userId,
+    channel: 'push'
+  });
+
+  return !existing;
+};
+
 const canSendSmsForIncident = async ({ incidentId, userId, dailyLimit }) => {
   const existing = await NotificationLog.findOne({
     incident_id: incidentId,
@@ -34,11 +48,12 @@ const markNotificationSent = async ({ incidentId, userId, channel }) => {
       channel
     });
   } catch (_error) {
-    // Ignore duplicates.
+    // Ignore duplicates (unique index).
   }
 };
 
 module.exports = {
+  canSendPushForIncident,
   canSendSmsForIncident,
   markNotificationSent
 };
